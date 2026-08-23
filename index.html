@@ -1177,6 +1177,11 @@ function update(dt){
   // pickups (float + collect)
   pickups.forEach(p=>{if(dist(p,player)<player.r+12)collect(p);});
 
+  // walking into the exit gate transitions automatically — no key needed
+  if(zoneTaskDone&&exitGate&&!transitioning&&!choicePending&&!inDialog&&dist(exitGate,player)<exitGate.r){
+    startZoneTransition(zone+1);
+  }
+
   // rescued ally follows and fights
   if(ally){
     const d=dist(ally,player);
@@ -1205,7 +1210,7 @@ function update(dt){
   if(nearStruct){pr.classList.add('show');
     const pt={ship:'board shuttle',beacon:'read beacon',vault:'enter vault',wreck:'search debris',
       survivor:'help survivor',powercell:'take power cell',door:carryingCell?'power the door':'door needs power',
-      gate:'move onward ▸'}[nearStruct.type]||'interact';
+      gate:'walk through ▸'}[nearStruct.type]||'interact';
     pr.innerHTML='<b>E</b> · '+pt;}
   else pr.classList.remove('show');
 
