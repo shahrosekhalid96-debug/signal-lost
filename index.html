@@ -101,7 +101,40 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 .screen{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
   padding:24px;background:radial-gradient(70% 60% at 50% 40%,#0d1428f2,#060811f5);}
 .screen.hidden{display:none;}
-.menu-card{max-width:520px;width:100%;text-align:center;}
+#titleFx{position:absolute;inset:0;width:100%;height:100%;z-index:0;}
+.menu-card{max-width:520px;width:100%;text-align:center;position:relative;z-index:2;}
+
+/* "LOST" — transmission breaking up */
+.gtitle .lost{display:inline-block;animation:glitchJitter 3.2s infinite steps(1,end);position:relative;}
+@keyframes glitchJitter{
+  0%,86%{transform:none;opacity:1;text-shadow:0 0 30px #ff5a6e77;}
+  87%{transform:translate(3px,-2px) skewX(6deg);opacity:.75;
+      text-shadow:-3px 0 #22d3ee,3px 0 #ff5a6e,0 0 30px #ff5a6e77;}
+  89%{transform:translate(-3px,2px);opacity:.9;
+      text-shadow:3px 0 #22d3ee,-3px 0 #ff5a6e;}
+  91%{transform:translate(1px,0) skewX(-4deg);opacity:.35;}
+  93%{transform:none;opacity:1;text-shadow:0 0 30px #ff5a6e77;}
+  96%{opacity:.6;}
+  97%,100%{transform:none;opacity:1;text-shadow:0 0 30px #ff5a6e77;}
+}
+/* story card — faint scan line sweeping like a decoding transmission */
+.story{position:relative;overflow:hidden;}
+.story::after{content:'';position:absolute;left:0;right:0;height:34px;top:-40px;
+  background:linear-gradient(180deg,transparent,#8fe3ff14,transparent);
+  animation:scanSweep 5s linear infinite;pointer-events:none;}
+@keyframes scanSweep{0%{top:-40px;}100%{top:110%;}}
+/* start button — soft breathing glow */
+.btn:not(.ghost){animation:btnBreathe 2.6s ease-in-out infinite;}
+@keyframes btnBreathe{
+  0%,100%{box-shadow:0 6px 0 #147a63,0 10px 30px #0af3;}
+  50%{box-shadow:0 6px 0 #147a63,0 10px 44px #2fd4ae66,0 0 24px #2fd4ae44;}
+}
+/* blinking terminal cursor on the sub line */
+.gsub::after{content:'▮';margin-left:6px;animation:curBlink 1.1s steps(1,end) infinite;color:var(--hud);}
+@keyframes curBlink{0%,60%{opacity:1;}61%,100%{opacity:0;}}
+@media (prefers-reduced-motion:reduce){
+  .gtitle .lost,.story::after,.btn:not(.ghost),.gsub::after{animation:none;}
+}
 .eyebrow{font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:4px;color:var(--hud);
   text-transform:uppercase;margin-bottom:14px;opacity:.85;}
 .gtitle{font-weight:700;font-size:clamp(38px,9vw,62px);line-height:.95;letter-spacing:-1px;margin-bottom:8px;
@@ -146,7 +179,9 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
     </div>
     <div class="right-hud">
       <div id="scrapTxt">◈ scrap 0</div>
+      <div id="artTxt" style="display:none">◆ artifacts 0</div>
       <div id="partsTxt">⬡ ship parts 0 / 4</div>
+      <div id="buffTxt" style="display:none;color:var(--ok);"></div>
       <div class="obj" id="objTxt">▸ find shelter</div>
     </div>
   </div>
@@ -166,8 +201,8 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
   </div>
 
   <!-- workbench (upgrade shop at the ship) -->
-  <div class="dialog hidden" id="bench" style="bottom:auto;top:50%;transform:translate(-50%,-50%);">
-    <div class="who">SHIP WORKBENCH · ◈ <span id="benchScrap">0</span> scrap</div>
+  <div class="dialog hidden" id="bench" style="bottom:auto;top:50%;transform:translate(-50%,-50%);max-height:82vh;overflow-y:auto;">
+    <div class="who">WORKBENCH & MARKET · ◈ <span id="benchScrap">0</span> scrap</div>
     <div id="benchList" style="display:flex;flex-direction:column;gap:8px;margin:10px 0;"></div>
     <div style="text-align:right;">
       <button class="btn ghost" style="padding:9px 18px;font-size:13px;" onclick="closeBench()">close · esc</button>
@@ -180,6 +215,7 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
 
   <!-- title screen -->
   <div class="screen" id="titleScreen">
+    <canvas id="titleFx"></canvas>
     <div class="menu-card">
       <div class="eyebrow">deep-survey vessel · aurora-9</div>
       <div class="gtitle">SIGNAL <span class="lost">LOST</span></div>
@@ -233,10 +269,12 @@ let running=false, paused=false;
 let time=0;
 
 /* ---------- story / progress ---------- */
-let scrap=0, shipParts=0, PARTS_NEEDED=6;
+let scrap=0, shipParts=0, PARTS_NEEDED=6, artifacts=0;
 let phase='parts';   // 'parts' -> 'core' -> 'escape' -> done
 let coreTaken=false, boss=null;
 let upg={dmg:0,hull:0,spd:0,cells:0};   // workbench upgrade levels
+let buffs={dmg:0,spd:0,shield:0};       // temporary marketplace buffs (seconds remaining)
+let dropTimer=rnd(70,110), activeDrop=null;   // periodic helper supply pod
 let objective='find shelter';
 let storyFlags={};
 let dialogQueue=[], inDialog=false;
@@ -343,6 +381,12 @@ function genWorld(){
   for(let i=0;i<30;i++){let ex,ey,tries=0;
     do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
     pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:Math.random()<.3?'medkit':'scrap'});
+  }
+  // alien artifacts — pure loot, worth good scrap when sold at the marketplace
+  artifacts=0;
+  for(let i=0;i<8;i++){let ex,ey,tries=0;
+    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
+    pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:'artifact'});
   }
 }
 function blob(gx,gy,r,t){for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){
@@ -453,7 +497,14 @@ const UPGRADES=[
   {id:'cells',icon:'⚡', name:'Cell efficiency', desc:'faster suit-energy regen per level', max:4, cost:l=>8+l*8},
   {id:'ammo', icon:'◈', name:'Fabricate cells', desc:'+10 blaster / +6 pulse ammo (repeatable)', max:99, cost:()=>6},
 ];
-function dmgMult(){return 1+upg.dmg*0.2;}
+/* marketplace consumables — one-time effects, bought with scrap, stack by re-buying */
+const MARKET=[
+  {id:'repair', icon:'✚', name:'Repair kit',   desc:'fully restore hull now', cost:14},
+  {id:'stim',   icon:'💉', name:'Adrenal stim', desc:'+40% damage & +25% speed for 25s', cost:16},
+  {id:'shield', icon:'✦', name:'Shield cell',   desc:'ignore all damage for 6s', cost:20},
+];
+function dmgMult(){return (1+upg.dmg*0.2)*(buffs.dmg>0?1.4:1);}
+function spdMult(){return (1+upg.spd*0.12)*(buffs.spd>0?1.25:1);}
 function openBench(){
   paused=true;
   const box=document.getElementById('bench');
@@ -463,9 +514,28 @@ function openBench(){
   else if(phase==='parts')log(`still missing ${PARTS_NEEDED-shipParts} hull part${PARTS_NEEDED-shipParts>1?'s':''}`,'warn');
 }
 function closeBench(){paused=false;document.getElementById('bench').classList.add('hidden');}
+function sectionHeader(txt){
+  const h=document.createElement('div');
+  h.style.cssText='font-family:"Share Tech Mono",monospace;font-size:11px;letter-spacing:2px;color:var(--muted);margin:10px 0 2px;text-transform:uppercase;';
+  h.textContent=txt;return h;
+}
 function renderBench(){
   document.getElementById('benchScrap').textContent=scrap;
   const list=document.getElementById('benchList');list.innerHTML='';
+
+  // ---- artifact cash-in row ----
+  const arow=document.createElement('div');arow.className='brow';
+  arow.innerHTML=`<span class="bi">◆</span>
+    <div class="bmeta"><div class="bname">Alien artifacts <span class="blv">${artifacts} held</span></div>
+    <div class="bdesc">sell all for scrap — value varies per artifact</div></div>`;
+  const sbtn=document.createElement('button');
+  sbtn.textContent=artifacts>0?'sell all':'none yet';
+  sbtn.disabled=artifacts===0;
+  sbtn.onclick=sellArtifacts;
+  arow.appendChild(sbtn);
+  list.appendChild(arow);
+
+  list.appendChild(sectionHeader('Upgrades — permanent'));
   UPGRADES.forEach(u=>{
     const lv=u.id==='ammo'?0:upg[u.id];
     const maxed=u.id!=='ammo'&&lv>=u.max;
@@ -481,6 +551,38 @@ function renderBench(){
     row.appendChild(btn);
     list.appendChild(row);
   });
+
+  list.appendChild(sectionHeader('Marketplace — consumables'));
+  MARKET.forEach(m=>{
+    const row=document.createElement('div');row.className='brow';
+    const active=buffs[m.id]>0;
+    row.innerHTML=`<span class="bi">${m.icon}</span>
+      <div class="bmeta"><div class="bname">${m.name}${active?` <span class="blv">active ${Math.ceil(buffs[m.id])}s</span>`:''}</div>
+      <div class="bdesc">${m.desc}</div></div>`;
+    const btn=document.createElement('button');
+    btn.textContent='◈ '+m.cost;
+    btn.disabled=scrap<m.cost;
+    btn.onclick=()=>buyConsumable(m.id);
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
+function sellArtifacts(){
+  if(artifacts<=0)return;
+  let total=0;
+  for(let i=0;i<artifacts;i++)total+=ri(15,25);
+  scrap+=total;artifacts=0;
+  sfx('buy');log('sold artifacts for +'+total+' scrap','ok');
+  updateHUD();renderBench();
+}
+function buyConsumable(id){
+  const m=MARKET.find(x=>x.id===id);
+  if(scrap<m.cost){log('not enough scrap','warn');return;}
+  scrap-=m.cost;
+  if(id==='repair'){player.hp=player.hpMax;log('hull fully repaired','ok');}
+  else if(id==='stim'){buffs.dmg=25;buffs.spd=25;log('adrenal stim active — +40% dmg, +25% speed','ok');}
+  else if(id==='shield'){buffs.shield=6;log('shield cell active — 6s of immunity','ok');}
+  sfx('buy');updateHUD();renderBench();
 }
 function buyUpgrade(id){
   const u=UPGRADES.find(x=>x.id===id);
@@ -491,7 +593,7 @@ function buyUpgrade(id){
   scrap-=cost;
   if(id==='dmg')upg.dmg++;
   else if(id==='hull'){upg.hull++;player.hpMax=100+upg.hull*25;player.hp=player.hpMax;}
-  else if(id==='spd'){upg.spd++;player.spd=150*(1+upg.spd*0.12);}
+  else if(id==='spd')upg.spd++;
   else if(id==='cells')upg.cells++;
   else if(id==='ammo'){WEAPONS.blaster.ammo+=10;WEAPONS.pulse.ammo+=6;renderWeapons();}
   sfx('buy');
@@ -572,6 +674,7 @@ function hurtEnemy(e,dmg){
 }
 function hurtPlayer(dmg){
   if(player.hurtCd>0)return;
+  if(buffs.shield>0){burst(player.x,player.y,'#8fe3ff',10);player.hurtCd=0.15;return;}
   sfx('hurt');
   player.hp-=dmg;player.hurtCd=0.6;
   burst(player.x,player.y,'#ff5a6e',10);
@@ -603,8 +706,43 @@ function collect(p){
     say('SUIT AI','Get to the ship and board. This is our one shot off Kepler-7b.');
     objective='return to the ship and escape';updateHUD();
     burst(p.x,p.y,'#c084fc',30);shake=8;}
+  else if(p.type==='artifact'){artifacts++;
+    log('◆ alien artifact ('+artifacts+') — sell it at the marketplace','ok');updateHUD();}
   burst(p.x,p.y,'#fff',8);
   pickups=pickups.filter(x=>x!==p);
+}
+
+/* ================= helper supply drop (periodic bonus from the ship) ================= */
+function updateSupplyDrop(dt){
+  if(!activeDrop){
+    dropTimer-=dt;
+    if(dropTimer<=0)launchSupplyDrop();
+    return;
+  }
+  const d=activeDrop;
+  if(d.state==='landing'){
+    d.t+=dt;
+    if(d.t>=d.landTime){d.state='ready';log('supply pod landed — go grab it','ok');}
+  } else if(d.state==='ready'){
+    if(!paused && dist(d,player)<player.r+16){
+      // reward: bonus scrap + ammo refill + partial heal, small chance of a bonus artifact
+      const bonus=ri(18,30);
+      scrap+=bonus;WEAPONS.blaster.ammo+=8;WEAPONS.pulse.ammo+=5;
+      player.hp=Math.min(player.hpMax,player.hp+15);
+      let msg='supply pod: +'+bonus+' scrap, cells & hull topped up';
+      if(Math.random()<0.35){artifacts++;msg+=', +1 artifact';}
+      sfx('pickup');burst(d.x,d.y,'#ffe36e',24);
+      log(msg,'ok');updateHUD();renderWeapons();
+      activeDrop=null;dropTimer=rnd(80,130);
+    }
+  }
+}
+function launchSupplyDrop(){
+  let ex,ey,tries=0;
+  do{ex=ri(4,MAP_W-5);ey=ri(4,MAP_H-5);tries++;}
+  while((solidTile(ex,ey)||dist({x:ex*TILE,y:ey*TILE},player)<TILE*6)&&tries<40);
+  activeDrop={x:(ex+.5)*TILE,y:(ey+.5)*TILE,state:'landing',t:0,landTime:3};
+  say('SUIT AI','Launching a supply pod your way — I marked the landing site.');
 }
 
 /* ================= sound (tiny WebAudio synth, no assets) ================= */
@@ -643,6 +781,8 @@ function sfx(name){
 let shake=0;
 function update(dt){
   time+=dt;
+  // supply drop advances even while dialog is open (pod keeps descending)
+  updateSupplyDrop(dt);
   if(inDialog)return;
   // movement
   let mx=0,my=0;
@@ -653,7 +793,8 @@ function update(dt){
   if(joy.active){mx+=joy.dx;my+=joy.dy;}
   const ml=Math.hypot(mx,my);
   if(ml>0){mx/=ml;my/=ml;
-    const nx=player.x+mx*player.spd*dt, ny=player.y+my*player.spd*dt;
+    const spd=player.spd*spdMult();
+    const nx=player.x+mx*spd*dt, ny=player.y+my*spd*dt;
     if(!solidAt(nx,player.y+ (my>0?player.r:-player.r)) && !solidAt(nx+(mx>0?player.r:-player.r),player.y))player.x=nx;
     if(!solidAt(player.x,ny+(my>0?player.r:-player.r)) && !solidAt(player.x+(mx>0?player.r:-player.r),ny))player.y=ny;
     player.x=clamp(player.x,TILE,(MAP_W-1)*TILE);player.y=clamp(player.y,TILE,(MAP_H-1)*TILE);
@@ -666,6 +807,10 @@ function update(dt){
   player.en=Math.min(player.enMax,player.en+dt*(8+upg.cells*4));
   if(player.atkCd>0)player.atkCd-=dt;
   if(player.hurtCd>0)player.hurtCd-=dt;
+  // temporary marketplace buffs count down
+  if(buffs.dmg>0)buffs.dmg-=dt;
+  if(buffs.spd>0)buffs.spd-=dt;
+  if(buffs.shield>0)buffs.shield-=dt;
   // attack
   if(mouse.down)attack();
 
@@ -747,10 +892,19 @@ function update(dt){
   particles=particles.filter(p=>p.life>0);
 
   if(shake>0)shake-=dt*30;
+  if(buffs.dmg>0||buffs.spd>0||buffs.shield>0)refreshBuffTxt();
 
   // camera follows player (smooth)
   cam.x+=((player.x-W/2)-cam.x)*Math.min(1,dt*8);
   cam.y+=((player.y-H/2)-cam.y)*Math.min(1,dt*8);
+}
+function refreshBuffTxt(){
+  const bt=document.getElementById('buffTxt');
+  const active=[];
+  if(buffs.dmg>0)active.push('dmg+spd '+Math.ceil(buffs.dmg)+'s');
+  if(buffs.shield>0)active.push('shield '+Math.ceil(buffs.shield)+'s');
+  if(active.length){bt.style.display='block';bt.textContent='✦ '+active.join(' · ');}
+  else bt.style.display='none';
 }
 
 /* ================= particles ================= */
@@ -822,18 +976,44 @@ function render(){
   // pickups
   pickups.forEach(p=>{const sx=p.x-ox,sy=p.y-oy;if(sx<-20||sy<-20||sx>W+20||sy>H+20)return;
     const bob=Math.sin(time*3+p.x)*3;
-    const icon={scrap:'◈',medkit:'✚',axe:'🪓',blaster:'🔫',pulse:'🭬',core:'❂'}[p.type];
+    const icon={scrap:'◈',medkit:'✚',axe:'🪓',blaster:'🔫',pulse:'🭬',core:'❂',artifact:'◆'}[p.type];
     if(p.type==='core'){ // pulsing alien core
       ctx.globalAlpha=.3+.3*Math.sin(time*4);ctx.fillStyle='#c084fc';
       ctx.beginPath();ctx.arc(sx,sy+bob,18,0,6.28);ctx.fill();ctx.globalAlpha=1;
       ctx.fillStyle='#e9d5ff';ctx.font='22px serif';ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.fillText('❂',sx,sy+bob);return;}
+    if(p.type==='artifact'){ // glowing gold collectible
+      ctx.globalAlpha=.35+.25*Math.sin(time*3.5+p.x);ctx.fillStyle='#ffe36e';
+      ctx.beginPath();ctx.arc(sx,sy+bob,13,0,6.28);ctx.fill();ctx.globalAlpha=1;
+      ctx.fillStyle='#fff3c4';ctx.font='17px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('◆',sx,sy+bob);return;}
     ctx.globalAlpha=.5;ctx.fillStyle='#8fe3ff';ctx.beginPath();ctx.arc(sx,sy+bob+4,4,0,6.28);ctx.fill();ctx.globalAlpha=1;
     ctx.font='18px serif';ctx.textAlign='center';ctx.textBaseline='middle';
     if(p.type==='scrap'){ctx.fillStyle='#8fe3ff';ctx.fillText('◈',sx,sy+bob);}
     else if(p.type==='medkit'){ctx.fillStyle='#7fe86b';ctx.fillText('✚',sx,sy+bob);}
     else{ctx.fillText(icon,sx,sy+bob);}
   });
+
+  // helper supply drop
+  if(activeDrop){
+    const sx=activeDrop.x-ox, sy=activeDrop.y-oy;
+    if(activeDrop.state==='landing'){
+      const p=activeDrop.t/activeDrop.landTime;
+      // descending beam of light + expanding landing ring
+      ctx.globalAlpha=0.5;ctx.fillStyle='#ffe36e';
+      ctx.fillRect(sx-3,sy-140*(1-p),6,140*(1-p));ctx.globalAlpha=1;
+      ctx.strokeStyle='#ffe36e';ctx.lineWidth=2;ctx.globalAlpha=0.5+0.3*Math.sin(time*8);
+      ctx.beginPath();ctx.arc(sx,sy,10+p*22,0,6.28);ctx.stroke();ctx.globalAlpha=1;
+    } else {
+      const bob=Math.sin(time*3)*3;
+      ctx.globalAlpha=.3+.3*Math.sin(time*4);ctx.fillStyle='#ffe36e';
+      ctx.beginPath();ctx.arc(sx,sy+bob,20,0,6.28);ctx.fill();ctx.globalAlpha=1;
+      ctx.fillStyle='#3a2f10';ctx.fillRect(sx-11,sy-9+bob,22,18);
+      ctx.strokeStyle='#ffe36e';ctx.lineWidth=2;ctx.strokeRect(sx-11,sy-9+bob,22,18);
+      ctx.fillStyle='#ffe36e';ctx.font='16px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('◎',sx,sy+bob);
+    }
+  }
 
   // bullets
   bullets.forEach(b=>{const sx=b.x-ox,sy=b.y-oy;
@@ -889,6 +1069,7 @@ function objectiveTargets(){
     pickups.forEach(p=>{if(p.type==='core')out.push({x:p.x,y:p.y,c:'#c084fc',kind:'core'});});
     out.push({x:shipObj().x,y:shipObj().y,c:'#7fe86b',kind:'ship'});
   }
+  if(activeDrop&&activeDrop.state==='ready')out.push({x:activeDrop.x,y:activeDrop.y,c:'#ffe36e',kind:'drop'});
   return out;
 }
 function shipObj(){return structures.find(s=>s.type==='ship');}
@@ -952,6 +1133,12 @@ function drawPlayer(x,y){
   const bob=Math.sin(player.walkT)*2;
   // shadow
   ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.ellipse(x,y+12,12,5,0,0,6.28);ctx.fill();
+  // shield buff ring
+  if(buffs.shield>0){ctx.strokeStyle='#8fe3ff';ctx.lineWidth=2;ctx.globalAlpha=0.6+0.3*Math.sin(time*10);
+    ctx.beginPath();ctx.arc(x,y+bob,20,0,6.28);ctx.stroke();ctx.globalAlpha=1;}
+  // stim buff glow
+  if(buffs.dmg>0){ctx.globalAlpha=0.15+0.1*Math.sin(time*6);ctx.fillStyle='#ffb454';
+    ctx.beginPath();ctx.arc(x,y+bob,18,0,6.28);ctx.fill();ctx.globalAlpha=1;}
   // body (suit)
   ctx.fillStyle=player.hurtCd>0.4?'#ff9aa5':'#5fd0e8';
   ctx.fillRect(x-9,y-12+bob,18,22);
@@ -1030,7 +1217,16 @@ function updateHUD(){
   document.getElementById('hpTxt').textContent=Math.ceil(player.hp);
   document.getElementById('enTxt').textContent=Math.ceil(player.en);
   document.getElementById('scrapTxt').textContent='◈ scrap '+scrap;
+  const at=document.getElementById('artTxt');
+  if(artifacts>0){at.style.display='block';at.textContent='◆ artifacts '+artifacts;}
+  else at.style.display='none';
   document.getElementById('partsTxt').textContent='⬡ ship parts '+shipParts+' / '+PARTS_NEEDED;
+  const bt=document.getElementById('buffTxt');
+  const active=[];
+  if(buffs.dmg>0)active.push('dmg+spd '+Math.ceil(buffs.dmg)+'s');
+  if(buffs.shield>0)active.push('shield '+Math.ceil(buffs.shield)+'s');
+  if(active.length){bt.style.display='block';bt.textContent='✦ '+active.join(' · ');}
+  else bt.style.display='none';
   document.getElementById('objTxt').textContent='▸ '+objective;
 }
 function renderWeapons(){
@@ -1079,7 +1275,8 @@ function startGame(){
   document.getElementById('weapons').style.display='flex';
   player=makePlayer();
   scrap=15;shipParts=0;phase='parts';coreTaken=false;boss=null;
-  upg={dmg:0,hull:0,spd:0,cells:0};paused=false;
+  upg={dmg:0,hull:0,spd:0,cells:0};buffs={dmg:0,spd:0,shield:0};paused=false;
+  dropTimer=rnd(70,110);activeDrop=null;
   document.getElementById('bench').classList.add('hidden');
   objective='find ship parts — 0/'+PARTS_NEEDED;
   // you salvage your kit from the wreck before setting out
@@ -1092,7 +1289,7 @@ function startGame(){
   running=true;
   say('SUIT AI','Systems rebooting... you survived the crash. The ship didn\'t. Six hull parts were thrown across the valley.');
   say('SUIT AI','I salvaged your axe and plasma blaster from the wreck — 15 cells loaded. There\'s a supply drop scattered around the crash site.');
-  say('SUIT AI','Follow the markers to each debris field. And remember: the ship workbench trades scrap for upgrades. Come back often.');
+  say('SUIT AI','Keep an eye out for alien artifacts too — sell them at the ship marketplace. And I\'ll launch you a supply pod now and then, when I can spare one.');
   log('WASD move · mouse aim · click attack · E interact','ok');
 }
 function continueGame(){startGame();/* hook for real save-continue later */}
@@ -1126,12 +1323,110 @@ function loop(now){
 }
 
 /* ================= boot ================= */
+/* ================= title screen FX =================
+   The story, animated: Aurora-9's hull pieces burn down the sky,
+   embers rise from the crash site, stars watch. Runs only while
+   the title screen is visible; stops itself once the game starts. */
+const tfx={cv:null,ctx:null,stars:[],debris:[],embers:[],nextDebris:0,running:false};
+function startTitleFx(){
+  tfx.cv=document.getElementById('titleFx');
+  if(!tfx.cv||!tfx.cv.getContext)return;
+  tfx.ctx=tfx.cv.getContext('2d');
+  sizeTitleFx();
+  // starfield
+  tfx.stars=[];const n=Math.floor(window.innerWidth*window.innerHeight/9000);
+  for(let i=0;i<n;i++)tfx.stars.push({x:Math.random()*window.innerWidth,y:Math.random()*window.innerHeight*0.75,
+    r:rnd(.4,1.4),tw:rnd(0,6.28),sp:rnd(.4,1.6)});
+  tfx.embers=[];tfx.debris=[];tfx.nextDebris=0.5;
+  tfx.running=true;
+  requestAnimationFrame(titleFxFrame);
+}
+function sizeTitleFx(){
+  if(!tfx.cv)return;
+  tfx.cv.width=window.innerWidth;tfx.cv.height=window.innerHeight;
+}
+let tfxLast=0;
+function titleFxFrame(now){
+  if(!tfx.running)return;
+  const scr=document.getElementById('titleScreen');
+  if(scr.classList.contains('hidden')){tfx.running=false;return;}
+  const dt=Math.min(0.05,(now-tfxLast)/1000||0.016);tfxLast=now;
+  const c=tfx.ctx,Wt=tfx.cv.width,Ht=tfx.cv.height,tt=now/1000;
+  c.clearRect(0,0,Wt,Ht);
+
+  // stars twinkle
+  tfx.stars.forEach(s=>{
+    c.globalAlpha=0.3+0.4*Math.abs(Math.sin(tt*s.sp+s.tw));
+    c.fillStyle='#cfd8ff';c.beginPath();c.arc(s.x,s.y,s.r,0,6.28);c.fill();
+  });
+  c.globalAlpha=1;
+
+  // distant valley silhouette (two jagged ridge lines)
+  c.fillStyle='#0a0f1e';
+  c.beginPath();c.moveTo(0,Ht*0.88);
+  for(let x=0;x<=Wt;x+=60)c.lineTo(x,Ht*0.88-18*Math.abs(Math.sin(x*0.013+2)));
+  c.lineTo(Wt,Ht);c.lineTo(0,Ht);c.closePath();c.fill();
+  c.fillStyle='#070b16';
+  c.beginPath();c.moveTo(0,Ht*0.94);
+  for(let x=0;x<=Wt;x+=45)c.lineTo(x,Ht*0.94-12*Math.abs(Math.sin(x*0.02)));
+  c.lineTo(Wt,Ht);c.lineTo(0,Ht);c.closePath();c.fill();
+
+  // spawn a falling hull piece every few seconds
+  tfx.nextDebris-=dt;
+  if(tfx.nextDebris<=0&&tfx.debris.length<3){
+    tfx.nextDebris=rnd(2.2,4.5);
+    const fromLeft=Math.random()<0.5;
+    tfx.debris.push({
+      x:fromLeft?rnd(-80,Wt*0.3):rnd(Wt*0.7,Wt+80),
+      y:rnd(-60,Ht*0.15),
+      vx:(fromLeft?1:-1)*rnd(90,150), vy:rnd(150,220),
+      rot:rnd(0,6.28), vr:rnd(-3,3), size:rnd(6,13)
+    });
+  }
+  // debris update + draw (burning hull chunks with flame trails)
+  for(let i=tfx.debris.length-1;i>=0;i--){
+    const d=tfx.debris[i];
+    d.x+=d.vx*dt;d.y+=d.vy*dt;d.rot+=d.vr*dt;
+    // flame trail particles
+    if(Math.random()<0.8)tfx.embers.push({x:d.x+rnd(-3,3),y:d.y+rnd(-3,3),
+      vx:-d.vx*0.15+rnd(-14,14),vy:-d.vy*0.15+rnd(-14,14),life:rnd(.35,.8),max:.8,
+      col:pick(['#ffb454','#ff7a45','#ffe36e'])});
+    // the chunk itself
+    c.save();c.translate(d.x,d.y);c.rotate(d.rot);
+    c.fillStyle='#4a5578';c.fillRect(-d.size/2,-d.size/2,d.size,d.size*0.7);
+    c.fillStyle='#ffb454';c.globalAlpha=0.7+0.3*Math.sin(tt*20+i);
+    c.fillRect(-d.size/2,-d.size/2,d.size*0.4,d.size*0.7);c.globalAlpha=1;
+    c.restore();
+    if(d.y>Ht*0.92||d.x<-120||d.x>Wt+120){
+      // impact flash at the ridge
+      for(let k=0;k<10;k++)tfx.embers.push({x:d.x,y:Math.min(d.y,Ht*0.9),
+        vx:rnd(-60,60),vy:rnd(-90,-20),life:rnd(.4,1),max:1,col:'#ffb454'});
+      tfx.debris.splice(i,1);
+    }
+  }
+  // embers (trail + crash-site drift)
+  if(Math.random()<0.25)tfx.embers.push({x:rnd(0,Wt),y:Ht*rnd(0.88,0.96),
+    vx:rnd(-8,8),vy:rnd(-30,-14),life:rnd(1,2.2),max:2.2,col:'#ff8a5b'});
+  for(let i=tfx.embers.length-1;i>=0;i--){
+    const e=tfx.embers[i];
+    e.x+=e.vx*dt;e.y+=e.vy*dt;e.life-=dt;
+    if(e.life<=0){tfx.embers.splice(i,1);continue;}
+    c.globalAlpha=Math.max(0,e.life/e.max)*0.85;
+    c.fillStyle=e.col;c.beginPath();c.arc(e.x,e.y,1.6,0,6.28);c.fill();
+  }
+  c.globalAlpha=1;
+  requestAnimationFrame(titleFxFrame);
+}
+window.addEventListener('resize',sizeTitleFx);
+
+/* ================= boot ================= */
 function boot(){
   resize();
   player=makePlayer();
   // intro story text on title
   document.getElementById('introStory').innerHTML=
-    `Your survey ship <b>Aurora-9</b> came apart in the upper atmosphere. You woke in the wreck, suit intact, on a valley floor that glitters wrong.<br><br>The hull broke into <b>four pieces</b> scattered across the map. Find them, fight what guards them, and fly out — before the things drawn to your engines find you first.`;
+    `Your survey ship <b>Aurora-9</b> came apart in the upper atmosphere. You woke in the wreck, suit intact, on a valley floor that glitters wrong.<br><br>The hull broke into <b>six pieces</b> scattered across the map. Find them, fight what guards them, and fly out — before the things drawn to your engines find you first.`;
+  startTitleFx();
   requestAnimationFrame(loop);
 }
 boot();
