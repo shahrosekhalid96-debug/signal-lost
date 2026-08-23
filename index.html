@@ -98,6 +98,7 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 .brow button:disabled{background:var(--edge);color:var(--muted);cursor:not-allowed;}
 
 /* ===== overlays (menus) ===== */
+#choiceScreen{z-index:210;}
 .screen{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
   padding:24px;background:radial-gradient(70% 60% at 50% 40%,#0d1428f2,#060811f5);}
 .screen.hidden{display:none;}
@@ -575,11 +576,11 @@ function spawnBoss(x,y){
 addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   keys[k]=true;
-  if(k==='escape'&&paused){closeBench();return;}
+  if(k==='escape'&&paused&&!choicePending){closeBench();return;}
   if(k==='m'&&running&&!paused&&!inDialog&&!choicePending){openBench();return;}
-  if(inDialog&&(k===' '||k==='enter')){advanceDialog();e.preventDefault();return;}
+  if(inDialog&&(k===' '||k==='enter'||k==='e')){advanceDialog();e.preventDefault();return;}
   if(['1','2','3'].includes(k)){selectByKey(k);}
-  if(k==='e')tryInteract();
+  if(k==='e'&&!inDialog&&!paused)tryInteract();
   if(k===' ')e.preventDefault();
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
@@ -743,6 +744,8 @@ const ZONE_CHOICES=[
   },
 ];
 function openZoneChoice(){
+  if(inDialog)return;                 // never open under a dialog box
+  if(choicePending)return;            // already open
   if(zone>=ZONE_CHOICES.length){advanceZone(zone+1);return;}
   paused=true;choicePending=true;
   const c=ZONE_CHOICES[zone];
