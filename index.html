@@ -135,6 +135,14 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 @media (prefers-reduced-motion:reduce){
   .gtitle .lost,.story::after,.btn:not(.ghost),.gsub::after{animation:none;}
 }
+/* zone entry banner */
+#zoneBanner{position:absolute;top:38%;left:0;right:0;z-index:30;text-align:center;pointer-events:none;
+  opacity:0;transition:opacity .6s;}
+#zoneBanner.show{opacity:1;}
+#zoneBanner .zn{font-family:'Chakra Petch',sans-serif;font-weight:700;font-size:clamp(30px,7vw,52px);
+  letter-spacing:1px;text-shadow:0 0 30px #0af6,0 2px 20px #000;}
+#zoneBanner .zt{font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:2px;color:var(--hud);
+  text-transform:uppercase;margin-top:6px;text-shadow:0 0 10px #000;}
 
 /* ===== cinematic intro ===== */
 #intro{position:fixed;inset:0;z-index:200;background:#000;opacity:1;transition:opacity .8s ease;}
@@ -292,6 +300,22 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
     <div class="cinebar bot"></div>
     <div id="introText"></div>
     <div id="introFlash"></div>
+
+  <!-- zone entry banner -->
+  <div id="zoneBanner" class="hidden"><div class="zn"></div><div class="zt"></div></div>
+
+  <!-- story choice screen -->
+  <div class="screen hidden" id="choiceScreen">
+    <div class="menu-card">
+      <div class="eyebrow">a choice</div>
+      <div id="choiceTitle" style="font-family:'Chakra Petch';font-weight:700;font-size:clamp(24px,5vw,34px);margin-bottom:10px;"></div>
+      <div class="story" id="choiceBody" style="text-align:left;"></div>
+      <div class="btnrow" style="flex-direction:column;">
+        <button class="btn" id="choiceA"></button>
+        <button class="btn ghost" id="choiceB"></button>
+      </div>
+    </div>
+  </div>
     <div id="introTitle"><span class="w1">SIGNAL</span><span class="w2">LOST</span></div>
     <button id="skipBtn" onclick="finishIntro()">skip ▸▸</button>
   </div>
@@ -363,6 +387,37 @@ let objective='find shelter';
 let storyFlags={};
 let dialogQueue=[], inDialog=false;
 
+/* ---------- zone journey system ----------
+   The game is a journey through distinct areas, each with its own palette,
+   enemies, and a unique task. A story choice at each threshold moves you on.
+   zone index: 0 valley -> 1 caves -> 2 ruins(boss) -> 3 shuttle(escape) */
+let zone=0, zoneTaskDone=false, exitGate=null, choicePending=false;
+let survivorSaved=false, tookShortcut=false;   // choices that color the ending
+let ally=null;                                  // rescued survivor who fights with you
+const ZONES=[
+  { key:'valley', name:'Crash Valley',
+    sky:['#12351f','#0d2417'], gA:'#182f1e', gB:'#1a3322', rock:'#2f4a3a', rockTop:'#3f5f49',
+    crystal:'#7fd8ff', accent:'#7fe86b',
+    parts:3, enemies:['crawler','crawler','brute'], enemyCount:14,
+    task:'salvage 3 hull parts', taskType:'parts' },
+  { key:'caves', name:'The Caves',
+    sky:['#0c1430','#070c1e'], gA:'#0f1830', gB:'#111c38', rock:'#232d4e', rockTop:'#33406a',
+    crystal:'#a08bff', accent:'#8fa8ff',
+    parts:2, enemies:['spitter','crawler','spitter'], enemyCount:16,
+    task:'restore power & salvage 2 parts', taskType:'power' },
+  { key:'ruins', name:'Alien Ruins',
+    sky:['#241436','#160a24'], gA:'#1e1330', gB:'#241838', rock:'#3a2a55', rockTop:'#4e3a6e',
+    crystal:'#e0a3ff', accent:'#c084fc',
+    parts:1, enemies:['brute','spitter','brute'], enemyCount:14,
+    task:'reach the vault & take the core', taskType:'vault' },
+  { key:'shuttle', name:'The Shuttle',
+    sky:['#1a2436','#0c1220'], gA:'#141c30', gB:'#182238', rock:'#2b3854', rockTop:'#3b4a6a',
+    crystal:'#8fe3ff', accent:'#7fe86b',
+    parts:0, enemies:['crawler','brute'], enemyCount:8,
+    task:'board the shuttle and escape', taskType:'escape' },
+];
+function Z(){return ZONES[zone];}
+
 /* ---------- weapons ---------- */
 const WEAPONS={
   fists:{name:'fists',icon:'✊',type:'melee',dmg:8,range:34,cd:0.4,key:'—',ammo:null},
@@ -390,88 +445,97 @@ function resize(){
 }
 window.addEventListener('resize',resize);
 
-/* ================= world generation ================= */
-function genWorld(){
-  map=[];decor=[];structures=[];
+/* ================= world generation (per zone) ================= */
+function genWorld(){ genZone(0); }
+function genZone(zi){
+  zone=zi; zoneTaskDone=false; exitGate=null; choicePending=false;
+  const Zc=ZONES[zi];
+  map=[];decor=[];structures=[];enemies=[];pickups=[];bullets=[];particles=[];boss=null;activeDrop=null;
   for(let y=0;y<MAP_H;y++){map[y]=[];for(let x=0;x<MAP_W;x++)map[y][x]=T.GROUND;}
-  // scatter grass patches
-  for(let i=0;i<260;i++){const gx=ri(0,MAP_W-1),gy=ri(0,MAP_H-1);
-    blob(gx,gy,ri(1,3),T.GRASS);}
-  // rock formations (walls)
-  for(let i=0;i<70;i++){const gx=ri(2,MAP_W-3),gy=ri(2,MAP_H-3);
-    blob(gx,gy,ri(1,2),T.ROCK);}
-  // crystal clusters (mine for scrap)
-  for(let i=0;i<40;i++){const gx=ri(2,MAP_W-3),gy=ri(2,MAP_H-3);
-    if(map[gy][gx]===T.GROUND)map[gy][gx]=T.CRYSTAL;}
-  // water pools
-  for(let i=0;i<14;i++){const gx=ri(3,MAP_W-4),gy=ri(3,MAP_H-4);blob(gx,gy,ri(1,2),T.WATER);}
-  // border wall of rock
+  // terrain flavor per zone
+  const grassN = Zc.key==='valley'?260 : Zc.key==='caves'?40 : 120;
+  for(let i=0;i<grassN;i++){const gx=ri(0,MAP_W-1),gy=ri(0,MAP_H-1);blob(gx,gy,ri(1,3),T.GRASS);}
+  const rockN = Zc.key==='caves'?150 : 70;   // caves are dense/claustrophobic
+  for(let i=0;i<rockN;i++){const gx=ri(2,MAP_W-3),gy=ri(2,MAP_H-3);blob(gx,gy,ri(1,2),T.ROCK);}
+  for(let i=0;i<40;i++){const gx=ri(2,MAP_W-3),gy=ri(2,MAP_H-3);if(map[gy][gx]===T.GROUND)map[gy][gx]=T.CRYSTAL;}
+  if(Zc.key!=='caves')for(let i=0;i<14;i++){const gx=ri(3,MAP_W-4),gy=ri(3,MAP_H-4);blob(gx,gy,ri(1,2),T.WATER);}
   for(let x=0;x<MAP_W;x++){map[0][x]=T.ROCK;map[MAP_H-1][x]=T.ROCK;}
   for(let y=0;y<MAP_H;y++){map[y][0]=T.ROCK;map[y][MAP_W-1]=T.ROCK;}
-
-  // decor motes
   for(let i=0;i<400;i++)decor.push({x:rnd(MAP_W*TILE),y:rnd(MAP_H*TILE),type:pick(['mote','mote','pebble','fern'])});
 
-  // ---- the crash site (start), center-ish ----
-  const csx=Math.floor(MAP_W*0.5), csy=Math.floor(MAP_H*0.5);
-  carve(csx,csy,4);
-  map[csy][csx]=T.WRECK; map[csy][csx+1]=T.METAL; map[csy+1][csx]=T.METAL;
-  structures.push({type:'ship',x:(csx+.5)*TILE,y:(csy+.5)*TILE,r:44,label:'your ship — needs 6 parts'});
-  player.x=(csx+.5)*TILE; player.y=(csy+2)*TILE;
+  // player enters from the west edge of each zone
+  const enx=6, eny=Math.floor(MAP_H*0.5);
+  carve(enx,eny,4);
+  player.x=(enx+1)*TILE; player.y=(eny+.5)*TILE;
+  cam.x=player.x-W/2; cam.y=player.y-H/2;
 
-  // ---- 6 debris sites spread across the map, tougher the farther out ----
-  const spots=[
-    {x:12,y:12},{x:MAP_W-13,y:12},{x:12,y:MAP_H-13},{x:MAP_W-13,y:MAP_H-13},
-    {x:Math.floor(MAP_W*0.5),y:9},{x:Math.floor(MAP_W*0.5),y:MAP_H-10}
-  ];
-  spots.forEach((s,i)=>{
-    carve(s.x,s.y,3);
-    structures.push({type:'wreck',x:(s.x+.5)*TILE,y:(s.y+.5)*TILE,r:34,
-      label:'debris field',hasPart:true,partId:i,looted:false});
-    // guardians — gentle at the first sites, nastier the higher the index
-    const guards=(i<2?2:ri(2,3)+Math.floor(i/2));
-    for(let k=0;k<guards;k++){
-      const kind = i>=4&&k===0 ? 'spitter' : (i>=2 ? (Math.random()<0.3?'spitter':'brute') : 'crawler');
-      spawnEnemy((s.x+rnd(-2,2))*TILE,(s.y+rnd(-2,2))*TILE, kind);
-    }
-    // supply caches — early sites drop meds/scrap; pulse rifle still hidden at site 3
-    if(i===0){pickups.push({x:(s.x+.5)*TILE,y:(s.y+1.4)*TILE,type:'medkit'});
-      pickups.push({x:(s.x+1.2)*TILE,y:(s.y+1.4)*TILE,type:'scrap'});}
-    if(i===1){pickups.push({x:(s.x+.5)*TILE,y:(s.y+1.4)*TILE,type:'scrap'});
-      pickups.push({x:(s.x+1.2)*TILE,y:(s.y+1.4)*TILE,type:'scrap'});}
-    if(i===3)pickups.push({x:(s.x+.5)*TILE,y:(s.y+1.4)*TILE,type:'pulse'});
-  });
-  // an old distress beacon (story) near center
-  structures.push({type:'beacon',x:(csx+6)*TILE,y:(csy-5)*TILE,r:30,label:'flickering beacon',read:false});
-  // starter supplies scattered around the crash — grab before heading out
-  pickups.push({x:(csx-2)*TILE,y:(csy+2.5)*TILE,type:'medkit'});
-  pickups.push({x:(csx+2.5)*TILE,y:(csy+2)*TILE,type:'scrap'});
-  pickups.push({x:(csx+1)*TILE,y:(csy+3.2)*TILE,type:'scrap'});
+  // scatter ambient enemies, scrap, artifacts (shared across zones)
+  const em=Zc.enemies;
+  for(let i=0;i<Zc.enemyCount;i++){let ex,ey,tries=0;
+    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
+    if(dist({x:ex*TILE,y:ey*TILE},{x:player.x,y:player.y})>300)spawnEnemy(ex*TILE,ey*TILE,pick(em));
+  }
+  for(let i=0;i<24;i++){let ex,ey,tries=0;
+    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
+    pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:Math.random()<.3?'medkit':'scrap'});}
+  for(let i=0;i<6;i++){let ex,ey,tries=0;
+    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
+    pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:'artifact'});}
 
-  // ---- ACT 2: the alien core vault, sealed until all parts are found ----
-  const vx=8, vy=Math.floor(MAP_H*0.5);
-  carve(vx,vy,4);
-  structures.push({type:'vault',x:(vx+.5)*TILE,y:(vy+.5)*TILE,r:40,
-    label:'alien structure — sealed',opened:false});
+  // zone-specific task setup
+  const eastX=MAP_W-8;
+  if(Zc.taskType==='parts'){
+    // ZONE 1 — salvage parts + rescue a survivor
+    const spots=[{x:16,y:12},{x:MAP_W-14,y:14},{x:18,y:MAP_H-14}];
+    spots.forEach((s,i)=>{carve(s.x,s.y,3);
+      structures.push({type:'wreck',x:(s.x+.5)*TILE,y:(s.y+.5)*TILE,r:34,hasPart:true,looted:false});
+      for(let k=0;k<ri(2,3);k++)spawnEnemy((s.x+rnd(-2,2))*TILE,(s.y+rnd(-2,2))*TILE,pick(em));});
+    pickups.push({x:(spots[0].x+.5)*TILE,y:(spots[0].y+1.4)*TILE,type:'medkit'});
+    pickups.push({x:(spots[1].x+.5)*TILE,y:(spots[1].y+1.4)*TILE,type:'blaster'});
+    // a stranded survivor to rescue (choice)
+    const su={x:Math.floor(MAP_W*0.5),y:16};carve(su.x,su.y,2);
+    structures.push({type:'survivor',x:(su.x+.5)*TILE,y:(su.y+.5)*TILE,r:26,helped:false,label:'a stranded survivor'});
+    for(let k=0;k<3;k++)spawnEnemy((su.x+rnd(-2,2))*TILE,(su.y-2+rnd(-1,1))*TILE,pick(em)); // guarded
+    structures.push({type:'beacon',x:(enx+7)*TILE,y:(eny-5)*TILE,r:30,read:false});
+  }
+  else if(Zc.taskType==='power'){
+    // ZONE 2 — carry a power cell to the sealed door
+    const genX=16, genY=Math.floor(MAP_H*0.5);carve(genX,genY,3);
+    structures.push({type:'powercell',x:(genX+.5)*TILE,y:(genY+.5)*TILE,r:26,taken:false,label:'power cell'});
+    for(let k=0;k<3;k++)spawnEnemy((genX+rnd(-2,2))*TILE,(genY+rnd(-2,2))*TILE,pick(em));
+    // two debris parts too
+    const spots=[{x:MAP_W-16,y:14},{x:MAP_W-18,y:MAP_H-16}];
+    spots.forEach(s=>{carve(s.x,s.y,3);
+      structures.push({type:'wreck',x:(s.x+.5)*TILE,y:(s.y+.5)*TILE,r:34,hasPart:true,looted:false});
+      for(let k=0;k<ri(2,3);k++)spawnEnemy((s.x+rnd(-2,2))*TILE,(s.y+rnd(-2,2))*TILE,pick(em));});
+    pickups.push({x:(spots[0].x+.5)*TILE,y:(spots[0].y+1.4)*TILE,type:'pulse'});
+    // the sealed door (needs the cell) sits before the exit
+    const dy=Math.floor(MAP_H*0.5);
+    structures.push({type:'door',x:(eastX-2)*TILE,y:(dy+.5)*TILE,r:34,powered:false,label:'sealed blast door'});
+  }
+  else if(Zc.taskType==='vault'){
+    // ZONE 3 — the vault + boss
+    const vx=Math.floor(MAP_W*0.5), vy=16;carve(vx,vy,4);
+    structures.push({type:'vault',x:(vx+.5)*TILE,y:(vy+.5)*TILE,r:40,opened:false,label:'the vault'});
+    // a couple parts to justify the trek
+    const spots=[{x:16,y:MAP_H-16},{x:MAP_W-16,y:MAP_H-16}];
+    spots.forEach(s=>{carve(s.x,s.y,3);
+      structures.push({type:'wreck',x:(s.x+.5)*TILE,y:(s.y+.5)*TILE,r:34,hasPart:true,looted:false});
+      for(let k=0;k<3;k++)spawnEnemy((s.x+rnd(-2,2))*TILE,(s.y+rnd(-2,2))*TILE,pick(em));});
+  }
+  else if(Zc.taskType==='escape'){
+    // FINAL — the shuttle
+    const shx=MAP_W-10, shy=Math.floor(MAP_H*0.5);carve(shx,shy,4);
+    structures.push({type:'ship',x:(shx+.5)*TILE,y:(shy+.5)*TILE,r:44,label:'your shuttle'});
+    // a light gauntlet between you and it
+    for(let k=0;k<6;k++)spawnEnemy((shx-rnd(6,16))*TILE,(shy+rnd(-6,6))*TILE,pick(em));
+  }
 
-  // ambient enemies + scrap scattered
-  for(let i=0;i<22;i++){let ex,ey,tries=0;
-    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
-    if(dist({x:ex*TILE,y:ey*TILE},{x:player.x,y:player.y})>260){
-      const r=Math.random();
-      spawnEnemy(ex*TILE,ey*TILE, r<.2?'brute':r<.35?'spitter':'crawler');
-    }
-  }
-  for(let i=0;i<30;i++){let ex,ey,tries=0;
-    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
-    pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:Math.random()<.3?'medkit':'scrap'});
-  }
-  // alien artifacts — pure loot, worth good scrap when sold at the marketplace
-  artifacts=0;
-  for(let i=0;i<8;i++){let ex,ey,tries=0;
-    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
-    pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:'artifact'});
-  }
+  // supply crate near entry each zone (a leg-up)
+  pickups.push({x:(enx+2)*TILE,y:(eny+2)*TILE,type:'medkit'});
+  pickups.push({x:(enx+3)*TILE,y:(eny+1)*TILE,type:'scrap'});
+
+  updateHUD();
 }
 function blob(gx,gy,r,t){for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){
   if(x*x+y*y<=r*r){const nx=gx+x,ny=gy+y;
@@ -481,6 +545,16 @@ function carve(gx,gy,r){for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){
 function solidTile(tx,ty){if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return true;
   const t=map[ty][tx];return t===T.ROCK||t===T.WATER||t===T.CRYSTAL||t===T.WRECK;}
 function solidAt(px,py){return solidTile(Math.floor(px/TILE),Math.floor(py/TILE));}
+/* count remaining parts in this zone's wrecks */
+function zonePartsLeft(){return structures.filter(s=>s.type==='wreck'&&s.hasPart&&!s.looted).length;}
+/* spawn the glowing exit gate on the east edge once the zone task is complete */
+function openExitGate(){
+  if(exitGate)return;
+  const gy=Math.floor(MAP_H*0.5);const gx=MAP_W-6;carve(gx,gy,3);
+  exitGate={type:'gate',x:(gx+.5)*TILE,y:(gy+.5)*TILE,r:40,label:'way onward'};
+  structures.push(exitGate);
+  log('the way onward has opened — head east ▸','ok');
+}
 
 /* ================= entities ================= */
 function makePlayer(){return{x:0,y:0,r:13,hp:100,hpMax:100,en:100,enMax:100,
@@ -502,6 +576,7 @@ addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   keys[k]=true;
   if(k==='escape'&&paused){closeBench();return;}
+  if(k==='m'&&running&&!paused&&!inDialog&&!choicePending){openBench();return;}
   if(inDialog&&(k===' '||k==='enter')){advanceDialog();e.preventDefault();return;}
   if(['1','2','3'].includes(k)){selectByKey(k);}
   if(k==='e')tryInteract();
@@ -558,50 +633,145 @@ function selectByKey(k){for(const id in WEAPONS)if(WEAPONS[id].key===k&&owned[id
 function selectWeapon(id){if(owned[id]){curWeapon=id;renderWeapons();}}
 
 /* ================= interaction ================= */
-let nearStruct=null;
+let nearStruct=null, carryingCell=false;
 function tryInteract(){
   if(!nearStruct)return;
   const s=nearStruct;
-  if(s.type==='ship'){
-    if(phase==='escape'&&coreTaken){ winGame(); }
-    else if(shipParts>=PARTS_NEEDED&&phase==='parts'){
-      // all parts in — but the engine won't start. Act 2 begins.
-      phase='core';
-      say('SUIT AI','All six parts fitted... but the engine won\'t hold a charge. The cells are dead.');
-      say('SUIT AI','There\'s an alien power source west of here — the vault the old crew warned about. It\'s the only cell that\'ll fit. We have no choice.');
-      objective='reach the alien vault (west)';updateHUD();
-      // unseal the vault
-      const v=structures.find(st=>st.type==='vault');if(v){v.label='alien structure — unsealed';}
-    }
-    else { openBench(); }   // ship doubles as your upgrade workbench
-  } else if(s.type==='wreck'&&s.hasPart&&!s.looted){
+
+  if(s.type==='wreck'&&s.hasPart&&!s.looted){
     s.looted=true; shipParts++; updateHUD(); sfx('part');
-    log('recovered a ship part! ('+shipParts+'/'+PARTS_NEEDED+')','ok');
     burst(s.x,s.y,'#8fe3ff',20);
-    if(shipParts===1)say('SUIT AI','One part down. Five to go. The others are farther out — expect worse.');
-    if(shipParts===3)say('SUIT AI','Halfway. The swarm is thicker toward the edges. Keep your cells charged.');
-    if(shipParts===PARTS_NEEDED){objective='return to your ship';updateHUD();
-      say('SUIT AI','That\'s all six. Get back to the ship — let\'s see if she flies.');}
-    else{objective='find ship parts — '+shipParts+'/'+PARTS_NEEDED;updateHUD();}
-  } else if(s.type==='vault'){
-    if(phase!=='core'){ log('sealed tight — nothing to do here yet','warn'); return; }
+    log('recovered a hull part ('+shipParts+'/'+PARTS_NEEDED+')','ok');
+    checkZoneTask();
+  }
+  else if(s.type==='survivor'&&!s.helped){
+    s.helped=true; survivorSaved=true;
+    ally={x:s.x,y:s.y,hp:60,hpMax:60,r:11,face:0,atkCd:0,shootCd:1,walkT:0};
+    say('SURVIVOR','You— you\'re real? Everyone else on my crew is gone. Please, get me out of here.');
+    say('SUIT AI','They\'ll slow you down. But another gun is another gun. Your call to make.');
+    log('survivor rescued — they\'ll fight alongside you','ok');
+    burst(s.x,s.y,'#7fe86b',16);
+    checkZoneTask();
+  }
+  else if(s.type==='powercell'&&!s.taken){
+    s.taken=true; carryingCell=true;
+    say('SUIT AI','Power cell in hand. Get it to the blast door on the east side — that\'s our way through.');
+    log('carrying the power cell — take it to the sealed door','ok');
+    burst(s.x,s.y,'#8fa8ff',14);
+  }
+  else if(s.type==='door'&&!s.powered){
+    if(!carryingCell){ log('the door is dead — find a power cell first','warn'); return; }
+    s.powered=true; carryingCell=false;
+    say('SUIT AI','Door\'s live. That\'s the way onward — but finish salvaging first if you haven\'t.');
+    burst(s.x,s.y,'#8fa8ff',20);sfx('part');
+    checkZoneTask();
+  }
+  else if(s.type==='vault'){
     if(!s.opened){
       s.opened=true;
       say('SUIT AI','It opened on its own. That\'s not comforting.');
       say('???','THIEF. THE CORE IS OURS.');
-      say('SUIT AI','Something big just woke up. Whatever it is — put it down and take the core.');
-      objective='defeat the guardian';updateHUD();
-      // spawn the boss + core pickup guarded
-      spawnBoss(s.x,s.y-TILE*1.5);
-      sfx('boss');
-      shake=12;
+      say('SUIT AI','Something big just woke up. Put it down and take the core.');
+      objective='defeat the Keeper';updateHUD();
+      spawnBoss(s.x,s.y-TILE*1.5);sfx('boss');shake=12;
     } else if(coreTaken){ log('the vault is empty now','warn'); }
-    else { log('the guardian still stands — the core is protected','warn'); }
-  } else if(s.type==='beacon'&&!s.read){
-    s.read=true;
-    say('OLD BEACON','...survey team seven... the vault... it feeds on our engines... the core is alive... do not wake the keeper...');
-    say('SUIT AI','A previous crew. They didn\'t make it. Now we know why the vault matters — and what\'s guarding it.');
+    else { log('the Keeper still stands — the core is protected','warn'); }
   }
+  else if(s.type==='beacon'&&!s.read){
+    s.read=true;
+    say('OLD BEACON','...survey team seven... the vault feeds on our engines... the core is alive... do not wake the keeper...');
+    say('SUIT AI','A previous crew. They didn\'t make it. Now we know what\'s waiting deeper in.');
+  }
+  else if(s.type==='gate'){
+    // reached the exit — offer the story choice
+    openZoneChoice();
+  }
+  else if(s.type==='ship'){
+    if(coreTaken){ winGame(); }
+    else { log('board only once the core is aboard','warn'); }
+  }
+}
+
+/* did we just finish this zone's task? if so, open the exit gate */
+function checkZoneTask(){
+  if(zoneTaskDone)return;
+  const Zc=Z();
+  let done=false;
+  if(Zc.taskType==='parts'){
+    done = zonePartsLeft()===0;
+  } else if(Zc.taskType==='power'){
+    const door=structures.find(s=>s.type==='door');
+    done = zonePartsLeft()===0 && door && door.powered;
+  } else if(Zc.taskType==='vault'){
+    done = coreTaken;
+  }
+  if(done){
+    zoneTaskDone=true;
+    objective='head east to move on ▸';updateHUD();
+    say('SUIT AI','That\'s everything here. A path opened east — let\'s keep moving.');
+    openExitGate();
+  } else {
+    // update running objective
+    if(Zc.taskType==='parts')objective='salvage parts — '+(Zc.parts-zonePartsLeft())+'/'+Zc.parts;
+    else if(Zc.taskType==='power'){const d=structures.find(s=>s.type==='door');
+      objective=zonePartsLeft()>0?('salvage parts — '+(Zc.parts-zonePartsLeft())+'/'+Zc.parts):(d&&d.powered?'':'power the blast door');}
+    updateHUD();
+  }
+}
+
+/* ================= zone transition & story choices ================= */
+const ZONE_CHOICES=[
+  { // leaving valley -> caves
+    title:'The valley narrows into a cave mouth.',
+    body: ()=> survivorSaved
+      ? 'The survivor points to a dark tunnel. "The caves. My crew went in and the sound... it changed them. But it\'s the only way east."'
+      : 'A dark tunnel yawns ahead — the only way east. Something moved in there when your light hit it.',
+    a:{label:'Push into the caves', go:()=>advanceZone(1)},
+    b:{label:'Rest first (heal, then go)', go:()=>{player.hp=player.hpMax;updateHUD();advanceZone(1);}},
+  },
+  { // leaving caves -> ruins
+    title:'Two paths split before the ruins.',
+    body: ()=> 'A long safe ledge curves around — or a collapsed shortcut straight down into the glow. Faster, but you\'d drop right among them.',
+    a:{label:'Take the safe way', go:()=>{tookShortcut=false;advanceZone(2);}},
+    b:{label:'Risk the shortcut (+scrap, more enemies)', go:()=>{tookShortcut=true;scrap+=25;advanceZone(2);}},
+  },
+  { // leaving ruins -> shuttle
+    title:'The core pulls you toward the surface.',
+    body: ()=> 'You can feel the shuttle bay ahead. This is the last stretch — whatever the core woke, it\'s not done with you.',
+    a:{label:'Run for the shuttle', go:()=>advanceZone(3)},
+    b:{label:'Steady yourself, then run', go:()=>{player.hp=player.hpMax;updateHUD();advanceZone(3);}},
+  },
+];
+function openZoneChoice(){
+  if(zone>=ZONE_CHOICES.length){advanceZone(zone+1);return;}
+  paused=true;choicePending=true;
+  const c=ZONE_CHOICES[zone];
+  document.getElementById('choiceTitle').textContent=c.title;
+  document.getElementById('choiceBody').textContent=c.body();
+  const aB=document.getElementById('choiceA'),bB=document.getElementById('choiceB');
+  aB.textContent='▸ '+c.a.label; bB.textContent='▸ '+c.b.label;
+  aB.onclick=()=>{closeChoice();c.a.go();};
+  bB.onclick=()=>{closeChoice();c.b.go();};
+  document.getElementById('choiceScreen').classList.remove('hidden');
+}
+function closeChoice(){choicePending=false;paused=false;document.getElementById('choiceScreen').classList.add('hidden');}
+function advanceZone(zi){
+  if(zi>=ZONES.length){winGame();return;}
+  genZone(zi);
+  const Zc=ZONES[zi];
+  flashZoneTitle(Zc.name, Zc.task);
+  objective=Zc.task;updateHUD();
+  // carry the ally forward if rescued
+  if(ally){ally.x=player.x-30;ally.y=player.y;}
+  if(Zc.taskType==='parts')objective='salvage parts — 0/'+Zc.parts;
+  updateHUD();
+}
+function flashZoneTitle(name,task){
+  const el=document.getElementById('zoneBanner');
+  el.querySelector('.zn').textContent=name;
+  el.querySelector('.zt').textContent=task;
+  el.classList.remove('hidden');el.classList.add('show');
+  setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.classList.add('hidden'),600);},2600);
 }
 
 /* ================= workbench (upgrades) ================= */
@@ -625,8 +795,6 @@ function openBench(){
   const box=document.getElementById('bench');
   box.classList.remove('hidden');
   renderBench();
-  if(phase==='core'&&!coreTaken)log('the engine still needs the alien core','warn');
-  else if(phase==='parts')log(`still missing ${PARTS_NEEDED-shipParts} hull part${PARTS_NEEDED-shipParts>1?'s':''}`,'warn');
 }
 function closeBench(){paused=false;document.getElementById('bench').classList.add('hidden');}
 function sectionHeader(txt){
@@ -816,11 +984,10 @@ function collect(p){
   else if(p.type==='pulse'){owned.pulse=true;WEAPONS.pulse.ammo+=10;
     say('SUIT AI','A pulse rifle. Whoever hid this out here knew what was coming.');
     renderWeapons();}
-  else if(p.type==='core'){coreTaken=true;phase='escape';
-    say('SUIT AI','Core secured — it\'s warm, and it\'s pulling toward the ship like it wants to go home.');
-    say('SUIT AI','Get to the ship and board. This is our one shot off Kepler-7b.');
-    objective='return to the ship and escape';updateHUD();
-    burst(p.x,p.y,'#c084fc',30);shake=8;}
+  else if(p.type==='core'){coreTaken=true;
+    say('SUIT AI','Core secured — it\'s warm, and it\'s pulling east, toward the surface.');
+    burst(p.x,p.y,'#c084fc',30);shake=8;
+    checkZoneTask();}
   else if(p.type==='artifact'){artifacts++;
     log('◆ alien artifact ('+artifacts+') — sell it at the marketplace','ok');updateHUD();}
   burst(p.x,p.y,'#fff',8);
@@ -991,17 +1158,36 @@ function update(dt){
   // pickups (float + collect)
   pickups.forEach(p=>{if(dist(p,player)<player.r+12)collect(p);});
 
+  // rescued ally follows and fights
+  if(ally){
+    const d=dist(ally,player);
+    if(d>60){const a=Math.atan2(player.y-ally.y,player.x-ally.x);
+      const nx=ally.x+Math.cos(a)*120*dt, ny=ally.y+Math.sin(a)*120*dt;
+      if(!solidAt(nx,ally.y))ally.x=nx; if(!solidAt(ally.x,ny))ally.y=ny;ally.walkT+=dt*8;}
+    // shoot nearest enemy in range
+    ally.shootCd-=dt;
+    let tgt=null,td=260;
+    enemies.forEach(e=>{const ed=dist(ally,e);if(ed<td){td=ed;tgt=e;}});
+    if(tgt){ally.face=Math.atan2(tgt.y-ally.y,tgt.x-ally.x);
+      if(ally.shootCd<=0){ally.shootCd=0.6;
+        bullets.push({x:ally.x,y:ally.y,vx:Math.cos(ally.face)*460,vy:Math.sin(ally.face)*460,
+          dmg:12,life:1,color:'#7fe86b'});}}
+  }
+
   // nearest interactable structure
   nearStruct=null;let best=1e9;
   structures.forEach(s=>{const d=dist(s,player);
-    const usable=(s.type==='ship')||(s.type==='wreck'&&s.hasPart&&!s.looted)||(s.type==='beacon'&&!s.read)||
-      (s.type==='vault'&&phase==='core'&&!coreTaken);
+    const usable=(s.type==='ship'&&coreTaken)||(s.type==='wreck'&&s.hasPart&&!s.looted)||
+      (s.type==='beacon'&&!s.read)||(s.type==='vault'&&!coreTaken)||
+      (s.type==='survivor'&&!s.helped)||(s.type==='powercell'&&!s.taken)||
+      (s.type==='door'&&!s.powered)||(s.type==='gate');
     if(usable&&d<s.r+player.r+8&&d<best){best=d;nearStruct=s;}});
   const pr=document.getElementById('prompt');
   if(nearStruct){pr.classList.add('show');
-    pr.innerHTML=(nearStruct.type==='ship'?'<b>E</b> · board ship':
-      nearStruct.type==='beacon'?'<b>E</b> · read beacon':
-      nearStruct.type==='vault'?'<b>E</b> · enter vault':'<b>E</b> · search debris');}
+    const pt={ship:'board shuttle',beacon:'read beacon',vault:'enter vault',wreck:'search debris',
+      survivor:'help survivor',powercell:'take power cell',door:carryingCell?'power the door':'door needs power',
+      gate:'move onward ▸'}[nearStruct.type]||'interact';
+    pr.innerHTML='<b>E</b> · '+pt;}
   else pr.classList.remove('show');
 
   // particles
@@ -1030,15 +1216,16 @@ function burst(x,y,color,n){for(let i=0;i<n;i++){const a=rnd(0,6.28),s=rnd(30,14
 
 /* ================= render ================= */
 function tileColor(t,x,y){
+  const z=Z();
   switch(t){
-    case T.GROUND: return ((x+y)&1)?'#182036':'#1a2338';
+    case T.GROUND: return ((x+y)&1)?z.gA:z.gB;
     case T.GRASS:  return ((x+y)&1)?'#1e3a2e':'#22422f';
-    case T.ROCK:   return '#39445e';
+    case T.ROCK:   return z.rock;
     case T.CRYSTAL:return '#2a3a6a';
     case T.WATER:  return '#123a55';
     case T.WRECK:  return '#4a3540';
     case T.METAL:  return '#3a4358';
-    default:return '#1a2338';
+    default:return z.gB;
   }
 }
 function render(){
@@ -1111,17 +1298,45 @@ function render(){
       ctx.fillStyle=s.read?'#556':'#ffb454';ctx.globalAlpha=s.read?1:(.4+.5*Math.abs(Math.sin(time*3)));
       ctx.beginPath();ctx.arc(sx,sy-10,6,0,6.28);ctx.fill();ctx.globalAlpha=1;}
     else if(s.type==='vault'){
-      // alien monolith — with a lit left face and shadowed right for volume
-      ctx.fillStyle='#181026';ctx.fillRect(sx-26,sy-34,52,60);      // right/back (dark)
-      ctx.fillStyle='#241b38';ctx.fillRect(sx-26,sy-34,44,60);      // main
-      ctx.fillStyle='#2f2450';ctx.fillRect(sx-20,sy-28,34,48);      // lit inset
+      ctx.fillStyle='#181026';ctx.fillRect(sx-26,sy-34,52,60);
+      ctx.fillStyle='#241b38';ctx.fillRect(sx-26,sy-34,44,60);
+      ctx.fillStyle='#2f2450';ctx.fillRect(sx-20,sy-28,34,48);
       const open=s.opened;
       ctx.fillStyle=open?'#0a0d16':'#1a1030';
-      ctx.fillRect(sx-12,sy-20,24,40); // doorway
-      ctx.fillStyle=phase==='core'&&!open?'#c084fc':(open?'#3a2a55':'#4a3a6a');
-      ctx.globalAlpha=phase==='core'&&!open?(.5+.5*Math.abs(Math.sin(time*2))):1;
+      ctx.fillRect(sx-12,sy-20,24,40);
+      ctx.fillStyle=!open?'#c084fc':'#3a2a55';
+      ctx.globalAlpha=!open?(.5+.5*Math.abs(Math.sin(time*2))):1;
       for(let i=0;i<3;i++)ctx.fillRect(sx-16,sy-24+i*14,32,3);
       ctx.globalAlpha=1;
+    }
+    else if(s.type==='survivor'&&!s.helped){
+      // a person crouched, waving beacon light
+      ctx.fillStyle='#c98a5a';ctx.fillRect(sx-5,sy-14,10,16);
+      ctx.fillStyle='#e8c9a0';ctx.beginPath();ctx.arc(sx,sy-16,5,0,6.28);ctx.fill();
+      ctx.fillStyle='#7fe86b';ctx.globalAlpha=.4+.5*Math.abs(Math.sin(time*4));
+      ctx.beginPath();ctx.arc(sx,sy-2,22,0,6.28);ctx.fill();ctx.globalAlpha=1;
+    }
+    else if(s.type==='powercell'&&!s.taken){
+      ctx.fillStyle='#1a2340';ctx.fillRect(sx-9,sy-12,18,22);
+      ctx.fillStyle='#8fa8ff';ctx.globalAlpha=.6+.4*Math.sin(time*5);
+      ctx.fillRect(sx-5,sy-8,10,14);ctx.globalAlpha=1;
+      ctx.fillStyle='#cdd8ff';ctx.fillRect(sx-2,sy-14,4,4);
+    }
+    else if(s.type==='door'){
+      ctx.fillStyle='#141a2e';ctx.fillRect(sx-8,sy-30,16,60);   // frame
+      ctx.fillStyle=s.powered?'#2f5a4a':'#3a2530';
+      ctx.fillRect(sx-6,sy-26,12,52);
+      ctx.fillStyle=s.powered?'#7fe86b':'#ff5a6e';ctx.globalAlpha=.5+.4*Math.abs(Math.sin(time*(s.powered?2:6)));
+      ctx.fillRect(sx-6,sy-3,12,6);ctx.globalAlpha=1;
+    }
+    else if(s.type==='gate'){
+      // glowing archway east-exit
+      ctx.strokeStyle=Z().accent;ctx.lineWidth=4;ctx.globalAlpha=.6+.4*Math.abs(Math.sin(time*3));
+      ctx.beginPath();ctx.arc(sx,sy+10,30,Math.PI,0);ctx.stroke();
+      ctx.globalAlpha=.15+.1*Math.sin(time*2);ctx.fillStyle=Z().accent;
+      ctx.beginPath();ctx.arc(sx,sy,34,0,6.28);ctx.fill();ctx.globalAlpha=1;
+      ctx.fillStyle=Z().accent;ctx.font='18px "Share Tech Mono",monospace';ctx.textAlign='center';
+      ctx.fillText('▸',sx,sy);
     }
   });
 
@@ -1177,6 +1392,16 @@ function render(){
     drawEnemy(e,sx,sy);});
 
   // player
+  // ally
+  if(ally){const ax=ally.x-ox,ay=ally.y-oy;
+    ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(ax+4,ay+13,10,4,0,0,6.28);ctx.fill();
+    ctx.fillStyle='#c98a5a';ctx.fillRect(ax-5,ay-12,10,15);
+    ctx.fillStyle='#e8c9a0';ctx.beginPath();ctx.arc(ax,ay-13,5,0,6.28);ctx.fill();
+    ctx.strokeStyle='#7fe86b';ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(ax+Math.cos(ally.face)*12,ay+Math.sin(ally.face)*12);ctx.stroke();
+    if(ally.hp<ally.hpMax){ctx.fillStyle='#0008';ctx.fillRect(ax-10,ay-22,20,3);
+      ctx.fillStyle='#7fe86b';ctx.fillRect(ax-10,ay-22,20*(ally.hp/ally.hpMax),3);}
+  }
   drawPlayer(player.x-ox,player.y-oy);
 
   // particles
@@ -1217,17 +1442,21 @@ function render(){
 /* ---- current objective targets (where the arrows/minimap point) ---- */
 function objectiveTargets(){
   const out=[];
-  if(phase==='parts'){
-    structures.forEach(s=>{if(s.type==='wreck'&&s.hasPart&&!s.looted)out.push({x:s.x,y:s.y,c:'#8fe3ff',kind:'part'});});
-    if(shipParts>=PARTS_NEEDED)out.push({x:shipObj().x,y:shipObj().y,c:'#7fe86b',kind:'ship'});
-  } else if(phase==='core'){
-    const v=structures.find(s=>s.type==='vault');
-    if(v)out.push({x:v.x,y:v.y,c:'#c084fc',kind:'vault'});
+  const ac=Z().accent;
+  if(zoneTaskDone && exitGate){
+    out.push({x:exitGate.x,y:exitGate.y,c:ac,kind:'gate'});
+  } else {
+    // point at whatever this zone still needs
+    structures.forEach(s=>{
+      if(s.type==='wreck'&&s.hasPart&&!s.looted)out.push({x:s.x,y:s.y,c:'#8fe3ff',kind:'part'});
+      if(s.type==='survivor'&&!s.helped)out.push({x:s.x,y:s.y,c:'#7fe86b',kind:'survivor'});
+      if(s.type==='powercell'&&!s.taken&&!carryingCell)out.push({x:s.x,y:s.y,c:'#8fa8ff',kind:'cell'});
+      if(s.type==='door'&&!s.powered&&carryingCell)out.push({x:s.x,y:s.y,c:'#8fa8ff',kind:'door'});
+      if(s.type==='vault'&&!coreTaken)out.push({x:s.x,y:s.y,c:'#c084fc',kind:'vault'});
+      if(s.type==='ship'&&coreTaken)out.push({x:s.x,y:s.y,c:'#7fe86b',kind:'ship'});
+    });
     if(boss)out.push({x:boss.x,y:boss.y,c:'#ff5a6e',kind:'boss'});
     pickups.forEach(p=>{if(p.type==='core')out.push({x:p.x,y:p.y,c:'#c084fc',kind:'core'});});
-  } else if(phase==='escape'){
-    pickups.forEach(p=>{if(p.type==='core')out.push({x:p.x,y:p.y,c:'#c084fc',kind:'core'});});
-    out.push({x:shipObj().x,y:shipObj().y,c:'#7fe86b',kind:'ship'});
   }
   if(activeDrop&&activeDrop.state==='ready')out.push({x:activeDrop.x,y:activeDrop.y,c:'#ffe36e',kind:'drop'});
   return out;
@@ -1381,7 +1610,7 @@ function updateHUD(){
   const at=document.getElementById('artTxt');
   if(artifacts>0){at.style.display='block';at.textContent='◆ artifacts '+artifacts;}
   else at.style.display='none';
-  document.getElementById('partsTxt').textContent='⬡ ship parts '+shipParts+' / '+PARTS_NEEDED;
+  document.getElementById('partsTxt').textContent='◆ zone '+(zone+1)+'/4 · '+Z().name;
   const bt=document.getElementById('buffTxt');
   const active=[];
   if(buffs.dmg>0)active.push('dmg+spd '+Math.ceil(buffs.dmg)+'s');
@@ -1436,23 +1665,25 @@ function startGame(){
   document.getElementById('hud').style.display='flex';
   document.getElementById('weapons').style.display='flex';
   player=makePlayer();
-  scrap=15;shipParts=0;phase='parts';coreTaken=false;boss=null;
+  scrap=15;shipParts=0;coreTaken=false;boss=null;artifacts=0;
+  zone=0;zoneTaskDone=false;exitGate=null;choicePending=false;
+  survivorSaved=false;tookShortcut=false;ally=null;carryingCell=false;
   upg={dmg:0,hull:0,spd:0,cells:0};buffs={dmg:0,spd:0,shield:0};paused=false;
   dropTimer=rnd(70,110);activeDrop=null;
   document.getElementById('bench').classList.add('hidden');
-  objective='find ship parts — 0/'+PARTS_NEEDED;
-  // you salvage your kit from the wreck before setting out
+  document.getElementById('choiceScreen').classList.add('hidden');
   owned={fists:true,axe:true,blaster:true,pulse:false};curWeapon='axe';
   WEAPONS.blaster.ammo=15;WEAPONS.pulse.ammo=0;
   enemies=[];pickups=[];bullets=[];particles=[];
-  genWorld();
+  genZone(0);
+  objective=ZONES[0].task;
   cam.x=player.x-W/2;cam.y=player.y-H/2;
   updateHUD();renderWeapons();
   running=true;
-  say('SUIT AI','Systems rebooting... you survived the crash. The ship didn\'t. Six hull parts were thrown across the valley.');
-  say('SUIT AI','I salvaged your axe and plasma blaster from the wreck — 15 cells loaded. There\'s a supply drop scattered around the crash site.');
-  say('SUIT AI','Keep an eye out for alien artifacts too — sell them at the ship marketplace. And I\'ll launch you a supply pod now and then, when I can spare one.');
-  log('WASD move · click or SPACE attack · aim with mouse or by moving · E interact','ok');
+  flashZoneTitle(ZONES[0].name, ZONES[0].task);
+  say('SUIT AI','You survived the crash — barely. The hull scattered across this valley in pieces.');
+  say('SUIT AI','Salvage what you can, then push east. There\'s a long way between here and any way off this rock.');
+  log('WASD move · click/SPACE attack · aim by moving or mouse · E interact','ok');
 }
 function continueGame(){startGame();/* hook for real save-continue later */}
 function loseGame(){
@@ -1471,7 +1702,12 @@ function winGame(){
   document.getElementById('endEyebrow').textContent='engines online';
   document.getElementById('endTitle').innerHTML='YOU <span style="color:var(--ok)">ESCAPED</span>';
   document.getElementById('endStory').innerHTML=
-    `Six parts, one stolen alien core. The engines catch — and Kepler-7b falls away beneath you.<br><br>The keeper is dead, the vault is silent, and the swarm gathers at the sound of your engines too late.<br><br>You recovered all <b>${PARTS_NEEDED}</b> parts, the core, and <b>${scrap}</b> scrap. Whatever that core is, it's leaving with you — and it's still warm.<br><br><span style="color:var(--muted)">The signal is yours again.</span>`;
+    `The engines catch — and Kepler-7b falls away beneath you.<br><br>`+
+    (survivorSaved
+      ? `The survivor you pulled from the caves is strapped in beside you, alive because of you.<br><br>`
+      : `You made it out alone. Somewhere below, a survivor you passed didn't.<br><br>`)+
+    `The Keeper is dead, the core is yours — still warm, still humming.<br><br>`+
+    `Scrap recovered: <b>${scrap}</b>.<br><br><span style="color:var(--muted)">The signal is yours again.</span>`;
   burst(player.x,player.y,'#7fe86b',40);
 }
 
