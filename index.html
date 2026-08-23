@@ -99,6 +99,9 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 
 /* ===== overlays (menus) ===== */
 #choiceScreen{z-index:210;}
+#fadeLayer{position:fixed;inset:0;background:#02040a;opacity:0;pointer-events:none;z-index:205;
+  transition:opacity .5s ease;}
+#fadeLayer.on{opacity:1;pointer-events:auto;}
 .screen{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
   padding:24px;background:radial-gradient(70% 60% at 50% 40%,#0d1428f2,#060811f5);}
 .screen.hidden{display:none;}
@@ -301,11 +304,17 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
     <div class="cinebar bot"></div>
     <div id="introText"></div>
     <div id="introFlash"></div>
+    <div id="introTitle"><span class="w1">SIGNAL</span><span class="w2">LOST</span></div>
+    <button id="skipBtn" onclick="finishIntro()">skip ▸▸</button>
+  </div>
+
+  <!-- zone fade transition layer -->
+  <div id="fadeLayer"></div>
 
   <!-- zone entry banner -->
   <div id="zoneBanner" class="hidden"><div class="zn"></div><div class="zt"></div></div>
 
-  <!-- story choice screen -->
+  <!-- story choice screen (chapter-entry decision) -->
   <div class="screen hidden" id="choiceScreen">
     <div class="menu-card">
       <div class="eyebrow">a choice</div>
@@ -316,9 +325,6 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
         <button class="btn ghost" id="choiceB"></button>
       </div>
     </div>
-  </div>
-    <div id="introTitle"><span class="w1">SIGNAL</span><span class="w2">LOST</span></div>
-    <button id="skipBtn" onclick="finishIntro()">skip ▸▸</button>
   </div>
 
   <!-- title screen -->
@@ -684,8 +690,8 @@ function tryInteract(){
     say('SUIT AI','A previous crew. They didn\'t make it. Now we know what\'s waiting deeper in.');
   }
   else if(s.type==='gate'){
-    // reached the exit — offer the story choice
-    openZoneChoice();
+    // travel now — fade to black, next chapter, choice on arrival
+    startZoneTransition(zone+1);
   }
   else if(s.type==='ship'){
     if(coreTaken){ winGame(); }
@@ -720,41 +726,51 @@ function checkZoneTask(){
   }
 }
 
-/* ================= zone transition & story choices ================= */
-const ZONE_CHOICES=[
-  { // leaving valley -> caves
-    title:'The valley narrows into a cave mouth.',
-    body: ()=> survivorSaved
-      ? 'The survivor points to a dark tunnel. "The caves. My crew went in and the sound... it changed them. But it\'s the only way east."'
-      : 'A dark tunnel yawns ahead — the only way east. Something moved in there when your light hit it.',
-    a:{label:'Push into the caves', go:()=>advanceZone(1)},
-    b:{label:'Rest first (heal, then go)', go:()=>{player.hp=player.hpMax;updateHUD();advanceZone(1);}},
-  },
-  { // leaving caves -> ruins
-    title:'Two paths split before the ruins.',
-    body: ()=> 'A long safe ledge curves around — or a collapsed shortcut straight down into the glow. Faster, but you\'d drop right among them.',
-    a:{label:'Take the safe way', go:()=>{tookShortcut=false;advanceZone(2);}},
-    b:{label:'Risk the shortcut (+scrap, more enemies)', go:()=>{tookShortcut=true;scrap+=25;advanceZone(2);}},
-  },
-  { // leaving ruins -> shuttle
-    title:'The core pulls you toward the surface.',
-    body: ()=> 'You can feel the shuttle bay ahead. This is the last stretch — whatever the core woke, it\'s not done with you.',
-    a:{label:'Run for the shuttle', go:()=>advanceZone(3)},
-    b:{label:'Steady yourself, then run', go:()=>{player.hp=player.hpMax;updateHUD();advanceZone(3);}},
-  },
-];
-function openZoneChoice(){
-  if(inDialog)return;                 // never open under a dialog box
-  if(choicePending)return;            // already open
-  if(zone>=ZONE_CHOICES.length){advanceZone(zone+1);return;}
+/* ================= zone transition & chapter-entry choices ================= */
+/* The gate transitions IMMEDIATELY (fade to black). The story choice then
+   appears as the new chapter's arrival decision — no dialog before travel. */
+const ENTRY_CHOICES={
+  1:{ title:'The Caves swallow the light.',
+    body:()=> survivorSaved
+      ? 'The survivor grips your arm at the tunnel mouth. "My crew went in there. The sound... changed them." You can rest a moment — or push straight in.'
+      : 'The tunnel walls hum faintly. Something moved when your light swept the dark. Catch your breath — or push straight in.',
+    a:{label:'Push straight in', apply:()=>{}},
+    b:{label:'Rest first (restore hull)', apply:()=>{player.hp=player.hpMax;updateHUD();log('you rest — hull restored','ok');}} },
+  2:{ title:'The Ruins glow ahead.',
+    body:()=> 'Two ways down: a long safe ledge, or a collapsed shortcut straight into the glow — faster, and there\'s scrap in the rubble, but you\'d drop right among them.',
+    a:{label:'Take the safe ledge', apply:()=>{tookShortcut=false;}},
+    b:{label:'Risk the shortcut (+25 scrap, +enemies)', apply:()=>{tookShortcut=true;scrap+=25;
+      for(let k=0;k<4;k++)spawnEnemy(player.x+rnd(120,260),player.y+rnd(-160,160),pick(Z().enemies));
+      updateHUD();log('you drop through — +25 scrap, they heard you','warn');}} },
+  3:{ title:'The shuttle bay is close.',
+    body:()=> 'The core hums against your back, pulling east. This is the last stretch — whatever it woke is between you and the sky.',
+    a:{label:'Run for the shuttle', apply:()=>{}},
+    b:{label:'Steady yourself (restore hull)', apply:()=>{player.hp=player.hpMax;updateHUD();log('you steady your breathing — hull restored','ok');}} },
+};
+let transitioning=false;
+function startZoneTransition(zi){
+  if(transitioning)return;
+  transitioning=true;paused=true;
+  const f=document.getElementById('fadeLayer');
+  f.classList.add('on');
+  setTimeout(()=>{
+    advanceZone(zi);
+    f.classList.remove('on');
+    transitioning=false;
+    // chapter-entry decision appears with the new zone
+    openEntryChoice(zi);
+  },560);
+}
+function openEntryChoice(zi){
+  const c=ENTRY_CHOICES[zi];
+  if(!c){paused=false;return;}
   paused=true;choicePending=true;
-  const c=ZONE_CHOICES[zone];
   document.getElementById('choiceTitle').textContent=c.title;
   document.getElementById('choiceBody').textContent=c.body();
   const aB=document.getElementById('choiceA'),bB=document.getElementById('choiceB');
   aB.textContent='▸ '+c.a.label; bB.textContent='▸ '+c.b.label;
-  aB.onclick=()=>{closeChoice();c.a.go();};
-  bB.onclick=()=>{closeChoice();c.b.go();};
+  aB.onclick=()=>{closeChoice();c.a.apply();};
+  bB.onclick=()=>{closeChoice();c.b.apply();};
   document.getElementById('choiceScreen').classList.remove('hidden');
 }
 function closeChoice(){choicePending=false;paused=false;document.getElementById('choiceScreen').classList.add('hidden');}
@@ -763,10 +779,10 @@ function advanceZone(zi){
   genZone(zi);
   const Zc=ZONES[zi];
   flashZoneTitle(Zc.name, Zc.task);
-  objective=Zc.task;updateHUD();
+  objective=Zc.taskType==='parts'?('salvage parts — 0/'+Zc.parts):Zc.task;
+  paused=false;
   // carry the ally forward if rescued
   if(ally){ally.x=player.x-30;ally.y=player.y;}
-  if(Zc.taskType==='parts')objective='salvage parts — 0/'+Zc.parts;
   updateHUD();
 }
 function flashZoneTitle(name,task){
@@ -1669,7 +1685,8 @@ function startGame(){
   document.getElementById('weapons').style.display='flex';
   player=makePlayer();
   scrap=15;shipParts=0;coreTaken=false;boss=null;artifacts=0;
-  zone=0;zoneTaskDone=false;exitGate=null;choicePending=false;
+  zone=0;zoneTaskDone=false;exitGate=null;choicePending=false;transitioning=false;
+  document.getElementById('fadeLayer').classList.remove('on');
   survivorSaved=false;tookShortcut=false;ally=null;carryingCell=false;
   upg={dmg:0,hull:0,spd:0,cells:0};buffs={dmg:0,spd:0,shield:0};paused=false;
   dropTimer=rnd(70,110);activeDrop=null;
