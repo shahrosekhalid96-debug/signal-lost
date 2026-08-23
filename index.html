@@ -206,16 +206,33 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 .controls-hint kbd{background:var(--edge);border-radius:4px;padding:1px 7px;color:var(--ink);font-size:11px;}
 button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-offset:3px;}
 
-/* mobile move pad */
-.mpad{position:absolute;bottom:80px;left:18px;z-index:10;width:132px;height:132px;display:none;
+/* ===== touch controls (tablet / phone) ===== */
+.tpad{position:absolute;z-index:12;width:150px;height:150px;display:none;pointer-events:auto;touch-action:none;
+  bottom:24px;}
+.tpad.left{left:20px;} .tpad.right{right:20px;}
+.tpad .ring{position:absolute;inset:0;border-radius:50%;background:#ffffff08;border:1px solid var(--edge);}
+.tpad .lbl{position:absolute;top:-20px;left:0;right:0;text-align:center;font-family:'Share Tech Mono',monospace;
+  font-size:10px;letter-spacing:1px;color:var(--muted);}
+.tpad .stick{position:absolute;width:60px;height:60px;border-radius:50%;left:45px;top:45px;
+  box-shadow:0 0 20px #0af4;}
+.tpad.left .stick{background:#8fe3ff33;border:2px solid var(--hud);}
+.tpad.right .stick{background:#ff5a6e33;border:2px solid var(--danger);box-shadow:0 0 20px #ff5a6e55;}
+.tpad.right .ring{border-color:#ff5a6e55;}
+/* touch action buttons stacked above the right stick */
+.tbtns{position:absolute;right:22px;bottom:186px;z-index:12;display:none;flex-direction:column;gap:10px;pointer-events:auto;}
+.tbtns button{width:58px;height:58px;border-radius:16px;background:var(--panel);border:1.5px solid var(--edge);
+  color:var(--ink);font-family:'Chakra Petch',sans-serif;font-weight:700;font-size:12px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;backdrop-filter:blur(6px);
   pointer-events:auto;}
-.mpad .stick{position:absolute;width:56px;height:56px;border-radius:50%;background:#8fe3ff33;
-  border:2px solid var(--hud);left:38px;top:38px;box-shadow:0 0 20px #0af4;}
-.mpad .ring{position:absolute;inset:0;border-radius:50%;background:#ffffff08;border:1px solid var(--edge);}
-.fire-btn{position:absolute;bottom:84px;right:18px;z-index:10;width:74px;height:74px;border-radius:50%;
-  background:#ff5a6e22;border:2px solid var(--danger);color:var(--danger);font-weight:700;font-size:13px;
-  display:none;align-items:center;justify-content:center;pointer-events:auto;box-shadow:0 0 20px #ff5a6e44;}
-@media (hover:none) and (pointer:coarse){ .mpad{display:block;} .fire-btn{display:flex;} .controls-hint.desk{display:none;} }
+.tbtns button .ic{font-size:20px;line-height:1;}
+.tbtns button:active{transform:scale(.92);border-color:var(--hud);}
+/* show whenever touch is detected (class) OR on coarse pointers (media query fallback) */
+body.touch-on .tpad, body.touch-on .tbtns{display:flex;}
+body.touch-on .controls-hint.desk{display:none;}
+body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
+@media (hover:none) and (pointer:coarse){
+  .tpad{display:flex;} .tbtns{display:flex;} .controls-hint.desk{display:none;}
+}
 </style>
 </head>
 <body>
@@ -260,9 +277,13 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
     </div>
   </div>
 
-  <!-- mobile controls -->
-  <div class="mpad" id="mpad"><div class="ring"></div><div class="stick" id="stick"></div></div>
-  <button class="fire-btn" id="fireBtn">FIRE</button>
+  <!-- touch controls: left = move, right = aim/fire, buttons = interact & weapon -->
+  <div class="tpad left" id="moveStick"><div class="ring"></div><div class="lbl">MOVE</div><div class="stick" id="moveKnob"></div></div>
+  <div class="tpad right" id="aimStick"><div class="ring"></div><div class="lbl">AIM · FIRE</div><div class="stick" id="aimKnob"></div></div>
+  <div class="tbtns" id="tbtns">
+    <button id="tInteract"><span class="ic">✋</span>USE</button>
+    <button id="tSwap"><span class="ic">🔁</span>WPN</button>
+  </div>
 
   <!-- cinematic intro -->
   <div id="intro" class="hidden">
@@ -491,17 +512,47 @@ let lastMouseT=0;
 cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();mouse.x=e.clientX-r.left;mouse.y=e.clientY-r.top;lastMouseT=Date.now();});
 cv.addEventListener('mousedown',e=>{if(inDialog){advanceDialog();return;}mouse.down=true;});
 addEventListener('mouseup',()=>mouse.down=false);
-// mobile joystick
-const mpad=document.getElementById('mpad'),stick=document.getElementById('stick');
-let joy={active:false,dx:0,dy:0};
-mpad.addEventListener('pointerdown',e=>{joy.active=true;joyMove(e);});
-mpad.addEventListener('pointermove',e=>{if(joy.active)joyMove(e);});
-mpad.addEventListener('pointerup',()=>{joy.active=false;joy.dx=0;joy.dy=0;stick.style.left='38px';stick.style.top='38px';});
-function joyMove(e){const r=mpad.getBoundingClientRect();let dx=e.clientX-r.left-66,dy=e.clientY-r.top-66;
-  const d=Math.hypot(dx,dy),max=40;if(d>max){dx=dx/d*max;dy=dy/d*max;}
-  joy.dx=dx/max;joy.dy=dy/max;stick.style.left=(38+dx)+'px';stick.style.top=(38+dy)+'px';}
-document.getElementById('fireBtn').addEventListener('pointerdown',()=>{mouse.down=true;});
-document.getElementById('fireBtn').addEventListener('pointerup',()=>{mouse.down=false;});
+
+// ===== twin-stick touch controls =====
+let joy={active:false,dx:0,dy:0};          // left stick -> movement
+let aim={active:false,dx:0,dy:0};          // right stick -> aim + fire
+function makeStick(padId,knobId,onMove,onEnd){
+  const pad=document.getElementById(padId),knob=document.getElementById(knobId);
+  const CENTER=45, MAX=45;                  // knob is 60px in a 150px pad
+  let pid=null;
+  function set(dx,dy){
+    const d=Math.hypot(dx,dy);
+    if(d>MAX){dx=dx/d*MAX;dy=dy/d*MAX;}
+    knob.style.left=(CENTER+dx)+'px';knob.style.top=(CENTER+dy)+'px';
+    onMove(dx/MAX,dy/MAX);
+  }
+  function fromEvent(e){const r=pad.getBoundingClientRect();return [e.clientX-r.left-75,e.clientY-r.top-75];}
+  pad.addEventListener('pointerdown',e=>{e.preventDefault();pid=e.pointerId;pad.setPointerCapture(pid);
+    const[x,y]=fromEvent(e);set(x,y);});
+  pad.addEventListener('pointermove',e=>{if(e.pointerId!==pid)return;const[x,y]=fromEvent(e);set(x,y);});
+  const end=e=>{if(e.pointerId!==pid)return;pid=null;knob.style.left=CENTER+'px';knob.style.top=CENTER+'px';onEnd();};
+  pad.addEventListener('pointerup',end);pad.addEventListener('pointercancel',end);
+}
+makeStick('moveStick','moveKnob',
+  (dx,dy)=>{joy.active=true;joy.dx=dx;joy.dy=dy;},
+  ()=>{joy.active=false;joy.dx=0;joy.dy=0;});
+makeStick('aimStick','aimKnob',
+  (dx,dy)=>{aim.active=(Math.hypot(dx,dy)>0.25);aim.dx=dx;aim.dy=dy;},
+  ()=>{aim.active=false;aim.dx=0;aim.dy=0;});
+// action buttons
+const tI=document.getElementById('tInteract'), tS=document.getElementById('tSwap');
+if(tI)tI.addEventListener('pointerdown',e=>{e.preventDefault();if(inDialog){advanceDialog();}else if(paused){/* market handles its own */}else tryInteract();});
+if(tS)tS.addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon();});
+function cycleWeapon(){
+  const order=['axe','blaster','pulse'].filter(id=>owned[id]);
+  if(order.length<2)return;
+  const i=order.indexOf(curWeapon);
+  curWeapon=order[(i+1)%order.length];renderWeapons();
+}
+// enable touch UI the moment any touch happens (covers tablets the media query misses)
+function enableTouch(){document.body.classList.add('touch-on');}
+addEventListener('touchstart',enableTouch,{once:true,passive:true});
+addEventListener('pointerdown',e=>{if(e.pointerType==='touch')enableTouch();},{passive:true});
 
 function selectByKey(k){for(const id in WEAPONS)if(WEAPONS[id].key===k&&owned[id]){curWeapon=id;renderWeapons();}}
 function selectWeapon(id){if(owned[id]){curWeapon=id;renderWeapons();}}
@@ -864,8 +915,9 @@ function update(dt){
     player.x=clamp(player.x,TILE,(MAP_W-1)*TILE);player.y=clamp(player.y,TILE,(MAP_H-1)*TILE);
     player.walkT+=dt*10;
   }
-  // aim priority: touch joystick > recently-used mouse > movement direction (keyboard-only)
-  if(joy.active&&ml>0)player.face=Math.atan2(my,mx);
+  // aim priority: right aim-stick > touch move-stick > recent mouse > movement direction
+  if(aim.active)player.face=Math.atan2(aim.dy,aim.dx);
+  else if(joy.active&&ml>0)player.face=Math.atan2(my,mx);
   else if(Date.now()-lastMouseT<2500){player.face=Math.atan2((mouse.y-H/2),(mouse.x-W/2));}
   else if(ml>0)player.face=Math.atan2(my,mx);
   // energy regen (faster with cell upgrades)
@@ -876,8 +928,8 @@ function update(dt){
   if(buffs.dmg>0)buffs.dmg-=dt;
   if(buffs.spd>0)buffs.spd-=dt;
   if(buffs.shield>0)buffs.shield-=dt;
-  // attack — mouse click OR Space/J for keyboard-only play
-  if(mouse.down||keys[' ']||keys['j'])attack();
+  // attack — mouse, Space/J keyboard, or pushing the aim stick
+  if(mouse.down||keys[' ']||keys['j']||aim.active)attack();
 
   // bullets
   bullets.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
@@ -995,15 +1047,43 @@ function render(){
   // visible tile range
   const x0=Math.max(0,Math.floor(ox/TILE)), x1=Math.min(MAP_W-1,Math.ceil((ox+W)/TILE));
   const y0=Math.max(0,Math.floor(oy/TILE)), y1=Math.min(MAP_H-1,Math.ceil((oy+H)/TILE));
+  // ---- pass 1: flat ground tiles ----
   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
     const t=map[y][x];const sx=x*TILE-ox, sy=y*TILE-oy;
-    ctx.fillStyle=tileColor(t,x,y);ctx.fillRect(sx,sy,TILE,TILE);
-    if(t===T.CRYSTAL){ctx.fillStyle='#7fd8ff';ctx.beginPath();
-      ctx.moveTo(sx+TILE/2,sy+6);ctx.lineTo(sx+TILE-8,sy+TILE/2);ctx.lineTo(sx+TILE/2,sy+TILE-6);ctx.lineTo(sx+8,sy+TILE/2);ctx.closePath();ctx.fill();
-      ctx.fillStyle='#cdefff';ctx.fillRect(sx+TILE/2-2,sy+10,4,TILE-20);}
-    if(t===T.ROCK){ctx.fillStyle='#2b3450';
-      ctx.fillRect(sx+4,sy+4,TILE-8,TILE-8);ctx.fillStyle='#454f6e';ctx.fillRect(sx+6,sy+6,TILE-16,6);}
+    if(t===T.ROCK||t===T.CRYSTAL){
+      // draw ground underneath raised objects so gaps don't show
+      ctx.fillStyle=((x+y)&1)?'#182036':'#1a2338';ctx.fillRect(sx,sy,TILE,TILE);
+    } else {
+      ctx.fillStyle=tileColor(t,x,y);ctx.fillRect(sx,sy,TILE,TILE);
+    }
     if(t===T.WATER){ctx.fillStyle='rgba(120,200,255,'+(0.1+0.05*Math.sin(time*2+x+y))+')';ctx.fillRect(sx,sy,TILE,TILE);}
+  }
+  // ---- pass 2: raised tiles (shadow + height) render on top so they overlap the tile below ----
+  const LIFT=10;               // pixels a block is "raised"
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    const t=map[y][x];if(t!==T.ROCK&&t!==T.CRYSTAL)continue;
+    const sx=x*TILE-ox, sy=y*TILE-oy;
+    // drop shadow (down-right, soft)
+    ctx.fillStyle='rgba(0,0,0,0.30)';
+    ctx.beginPath();ctx.ellipse(sx+TILE/2+5,sy+TILE-3,TILE*0.44,TILE*0.2,0,0,6.28);ctx.fill();
+    if(t===T.ROCK){
+      // side (dark, gives the block thickness)
+      ctx.fillStyle='#1c2540';ctx.fillRect(sx+4,sy+4-LIFT+ (TILE-8),TILE-8,LIFT);
+      ctx.fillStyle='#232d4e';ctx.fillRect(sx+4,sy+4-LIFT,TILE-8,TILE-8);
+      // top face (lit)
+      ctx.fillStyle='#3a4568';ctx.fillRect(sx+4,sy+4-LIFT,TILE-8,TILE-8);
+      ctx.fillStyle='#4a5578';ctx.fillRect(sx+6,sy+6-LIFT,TILE-14,7);
+      ctx.fillStyle='#2b3450';ctx.fillRect(sx+6,sy+TILE-8-LIFT,TILE-14,3);
+    } else { // CRYSTAL — glowing spire standing up
+      ctx.fillStyle='#1a2a55';ctx.beginPath();
+      ctx.moveTo(sx+TILE/2,sy+2-LIFT);ctx.lineTo(sx+TILE-9,sy+TILE/2);ctx.lineTo(sx+TILE/2,sy+TILE-6);ctx.lineTo(sx+9,sy+TILE/2);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#7fd8ff';ctx.globalAlpha=0.9;ctx.beginPath();
+      ctx.moveTo(sx+TILE/2,sy+4-LIFT);ctx.lineTo(sx+TILE-11,sy+TILE/2-2);ctx.lineTo(sx+TILE/2,sy+TILE-8);ctx.lineTo(sx+11,sy+TILE/2-2);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+      ctx.fillStyle='#cdefff';ctx.fillRect(sx+TILE/2-2,sy+8-LIFT,4,TILE-22);
+      // glow
+      ctx.globalAlpha=0.15+0.1*Math.sin(time*3+x);ctx.fillStyle='#7fd8ff';
+      ctx.beginPath();ctx.arc(sx+TILE/2,sy+TILE/2-LIFT/2,16,0,6.28);ctx.fill();ctx.globalAlpha=1;
+    }
   }
   // decor motes
   decor.forEach(d=>{const sx=d.x-ox,sy=d.y-oy;if(sx<-10||sy<-10||sx>W+10||sy>H+10)return;
@@ -1014,8 +1094,15 @@ function render(){
 
   // structures
   structures.forEach(s=>{const sx=s.x-ox,sy=s.y-oy;if(sx<-60||sy<-60||sx>W+60||sy>H+60)return;
+    // grounding shadow (offset to match light direction)
+    ctx.fillStyle='rgba(0,0,0,0.30)';ctx.beginPath();
+    const shR = s.type==='vault'?34 : s.type==='ship'?38 : s.type==='beacon'?8 : 22;
+    ctx.ellipse(sx+8,sy+(s.type==='beacon'?16:20),shR,shR*0.32,0,0,6.28);ctx.fill();
     if(s.type==='ship'){drawShip(sx,sy);}
-    else if(s.type==='wreck'){ctx.fillStyle=s.looted?'#2a3245':'#5a4a3a';
+    else if(s.type==='wreck'){
+      // side thickness
+      ctx.fillStyle='#1c1a24';ctx.fillRect(sx-20,sy-14+22,40,8);
+      ctx.fillStyle=s.looted?'#2a3245':'#5a4a3a';
       ctx.fillRect(sx-20,sy-14,40,28);ctx.fillStyle='#6a5a48';ctx.fillRect(sx-14,sy-20,10,12);
       ctx.fillStyle='#3a4358';ctx.fillRect(sx+4,sy-18,12,10);
       if(!s.looted){ctx.fillStyle='#8fe3ff';ctx.globalAlpha=.4+.3*Math.sin(time*4);
@@ -1024,13 +1111,13 @@ function render(){
       ctx.fillStyle=s.read?'#556':'#ffb454';ctx.globalAlpha=s.read?1:(.4+.5*Math.abs(Math.sin(time*3)));
       ctx.beginPath();ctx.arc(sx,sy-10,6,0,6.28);ctx.fill();ctx.globalAlpha=1;}
     else if(s.type==='vault'){
-      // alien monolith
-      ctx.fillStyle='#241b38';ctx.fillRect(sx-26,sy-34,52,60);
-      ctx.fillStyle='#2f2450';ctx.fillRect(sx-20,sy-28,40,48);
+      // alien monolith — with a lit left face and shadowed right for volume
+      ctx.fillStyle='#181026';ctx.fillRect(sx-26,sy-34,52,60);      // right/back (dark)
+      ctx.fillStyle='#241b38';ctx.fillRect(sx-26,sy-34,44,60);      // main
+      ctx.fillStyle='#2f2450';ctx.fillRect(sx-20,sy-28,34,48);      // lit inset
       const open=s.opened;
       ctx.fillStyle=open?'#0a0d16':'#1a1030';
       ctx.fillRect(sx-12,sy-20,24,40); // doorway
-      // glowing glyphs
       ctx.fillStyle=phase==='core'&&!open?'#c084fc':(open?'#3a2a55':'#4a3a6a');
       ctx.globalAlpha=phase==='core'&&!open?(.5+.5*Math.abs(Math.sin(time*2))):1;
       for(let i=0;i<3;i++)ctx.fillRect(sx-16,sy-24+i*14,32,3);
@@ -1098,6 +1185,14 @@ function render(){
       ctx.beginPath();ctx.arc(sx,sy,p.range,p.face-0.9,p.face+0.9);ctx.stroke();}
     else{ctx.globalAlpha=p.life/p.max;ctx.fillStyle=p.color;
       ctx.beginPath();ctx.arc(sx,sy,p.r||2,0,6.28);ctx.fill();ctx.globalAlpha=1;}});
+
+  // ---- 2.5D lighting: warm pool of light around the player, cool falloff outward ----
+  const plx=player.x-ox, ply=player.y-oy;
+  const lg=ctx.createRadialGradient(plx,ply,20,plx,ply,320);
+  lg.addColorStop(0,'rgba(255,240,210,0.10)');
+  lg.addColorStop(0.5,'rgba(140,227,255,0.03)');
+  lg.addColorStop(1,'rgba(4,6,12,0.28)');
+  ctx.fillStyle=lg;ctx.fillRect(0,0,W,H);
 
   // vignette
   const vg=ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.75);
@@ -1196,8 +1291,9 @@ function drawMinimap(){
 }
 function drawPlayer(x,y){
   const bob=Math.sin(player.walkT)*2;
-  // shadow
-  ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.ellipse(x,y+12,12,5,0,0,6.28);ctx.fill();
+  // elevated shadow — offset down-right, sized by bob (further when hopping) for a floating look
+  ctx.fillStyle='rgba(0,0,0,.32)';ctx.beginPath();
+  ctx.ellipse(x+5,y+15,12-bob*0.4,5-bob*0.15,0,0,6.28);ctx.fill();
   // shield buff ring
   if(buffs.shield>0){ctx.strokeStyle='#8fe3ff';ctx.lineWidth=2;ctx.globalAlpha=0.6+0.3*Math.sin(time*10);
     ctx.beginPath();ctx.arc(x,y+bob,20,0,6.28);ctx.stroke();ctx.globalAlpha=1;}
@@ -1218,7 +1314,7 @@ function drawPlayer(x,y){
 }
 function drawEnemy(e,x,y){
   const bob=Math.sin(e.walkT)*2;
-  ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(x,y+e.r*0.7,e.r*0.8,e.r*0.35,0,0,6.28);ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(x+e.r*0.35,y+e.r*0.85,e.r*0.8,e.r*0.32,0,0,6.28);ctx.fill();
   const col=e.hitFlash>0?'#fff':e.color;
   if(e.kind==='keeper'){
     // large armored guardian with a glowing core
