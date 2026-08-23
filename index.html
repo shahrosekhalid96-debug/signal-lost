@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Signal Lost — crash on Kepler-7b</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0a0d16; --panel:#111726cc; --panel-solid:#131a2b;
+  --edge:#2b3854; --hud:#8fe3ff; --hud-dim:#4a6b7d;
+  --ink:#dfe9f5; --muted:#8695ad;
+  --hp:#ff5a6e; --hp-bg:#3a1620; --energy:#57e6c4; --energy-bg:#123830;
+  --warn:#ffb454; --danger:#ff5a6e; --ok:#7fe86b;
+  --acid:#a3e635;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{
+  font-family:'Chakra Petch',system-ui,sans-serif; color:var(--ink);
+  background:var(--void); height:100%; user-select:none; touch-action:none;
+  position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+}
+#game{position:relative;width:100%;height:100%;}
+canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
+
+/* ===== HUD ===== */
+.hud{position:absolute;top:0;left:0;right:0;padding:14px 16px;z-index:10;pointer-events:none;
+  display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.bars{display:flex;flex-direction:column;gap:7px;width:min(210px,42vw);}
+.bar{position:relative;height:16px;border-radius:4px;overflow:hidden;border:1px solid var(--edge);
+  background:#0c1220;font-family:'Share Tech Mono',monospace;}
+.bar .fill{position:absolute;inset:0;transition:width .18s ease;border-radius:3px;}
+.bar.hp .fill{background:linear-gradient(90deg,#ff3b52,#ff7a88);}
+.bar.en .fill{background:linear-gradient(90deg,#2fd4ae,#7ff0d8);}
+.bar .lab{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;
+  padding:0 7px;font-size:10px;letter-spacing:1px;color:#fff;text-shadow:0 1px 2px #000c;z-index:2;}
+.right-hud{text-align:right;font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--hud);
+  text-shadow:0 0 8px #0af3;line-height:1.7;}
+.right-hud .obj{color:var(--warn);font-size:11px;max-width:200px;}
+
+/* weapon slots */
+.weapons{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:10;
+  display:flex;gap:8px;pointer-events:auto;}
+.wslot{width:56px;height:56px;border-radius:10px;background:var(--panel);border:2px solid var(--edge);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+  backdrop-filter:blur(6px);transition:border-color .15s,transform .1s;position:relative;}
+.wslot:active{transform:scale(.94);}
+.wslot.on{border-color:var(--hud);box-shadow:0 0 16px #8fe3ff55;}
+.wslot .icon{font-size:22px;line-height:1;}
+.wslot .nm{font-size:8.5px;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;}
+.wslot .ammo{position:absolute;top:-6px;right:-6px;background:var(--panel-solid);border:1px solid var(--edge);
+  border-radius:8px;font-size:9px;font-family:'Share Tech Mono',monospace;padding:1px 5px;color:var(--hud);}
+.wslot .key{position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);background:var(--edge);
+  border-radius:4px;font-size:8px;padding:0 5px;color:var(--ink);font-family:'Share Tech Mono',monospace;}
+.wslot.locked{opacity:.4;}
+
+/* log / toast messages */
+.log{position:absolute;bottom:82px;left:50%;transform:translateX(-50%);z-index:9;
+  display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none;width:100%;padding:0 16px;}
+.logline{font-family:'Share Tech Mono',monospace;font-size:12.5px;color:var(--hud);
+  background:#0a0f1caa;padding:4px 12px;border-radius:6px;border-left:2px solid var(--hud);
+  opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s;text-align:center;max-width:90%;}
+.logline.show{opacity:1;transform:translateY(0);}
+.logline.warn{color:var(--warn);border-color:var(--warn);}
+.logline.danger{color:var(--danger);border-color:var(--danger);}
+.logline.ok{color:var(--ok);border-color:var(--ok);}
+
+/* interaction prompt */
+.prompt{position:absolute;left:50%;top:62%;transform:translateX(-50%);z-index:9;
+  font-family:'Share Tech Mono',monospace;font-size:13px;color:#fff;background:#0af2;padding:6px 14px;
+  border-radius:8px;border:1px solid var(--hud);box-shadow:0 0 20px #0af4;pointer-events:none;
+  opacity:0;transition:opacity .2s;}
+.prompt.show{opacity:1;}
+.prompt b{color:var(--hud);}
+
+/* dialog box */
+.dialog{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);z-index:15;
+  width:min(560px,92vw);background:var(--panel-solid);border:1px solid var(--hud);border-radius:12px;
+  padding:16px 18px;box-shadow:0 0 40px #0af3, 0 10px 40px #000a;pointer-events:auto;}
+.dialog.hidden{display:none;}
+.dialog .who{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--hud);
+  text-transform:uppercase;margin-bottom:6px;}
+.dialog .txt{font-size:15px;line-height:1.55;min-height:44px;}
+.dialog .cont{text-align:right;font-size:11px;color:var(--muted);margin-top:8px;font-family:'Share Tech Mono',monospace;}
+
+/* workbench rows */
+.brow{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:#0a0f1c;border:1px solid var(--edge);border-radius:10px;padding:10px 12px;}
+.brow .bi{font-size:20px;flex:none;}
+.brow .bmeta{flex:1;min-width:0;}
+.brow .bname{font-size:13.5px;font-weight:600;}
+.brow .bdesc{font-size:11px;color:var(--muted);font-family:'Share Tech Mono',monospace;}
+.brow .blv{font-size:10px;color:var(--energy);font-family:'Share Tech Mono',monospace;}
+.brow button{font-family:'Chakra Petch',sans-serif;font-weight:600;font-size:12.5px;
+  padding:8px 14px;border:none;border-radius:9px;cursor:pointer;flex:none;
+  background:var(--energy);color:#04231c;}
+.brow button:disabled{background:var(--edge);color:var(--muted);cursor:not-allowed;}
+
+/* ===== overlays (menus) ===== */
+.screen{position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:radial-gradient(70% 60% at 50% 40%,#0d1428f2,#060811f5);}
+.screen.hidden{display:none;}
+.menu-card{max-width:520px;width:100%;text-align:center;}
+.eyebrow{font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:4px;color:var(--hud);
+  text-transform:uppercase;margin-bottom:14px;opacity:.85;}
+.gtitle{font-weight:700;font-size:clamp(38px,9vw,62px);line-height:.95;letter-spacing:-1px;margin-bottom:8px;
+  text-shadow:0 0 30px #0af5;}
+.gtitle .lost{color:var(--danger);text-shadow:0 0 30px #ff5a6e77;}
+.gsub{font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--muted);margin-bottom:8px;line-height:1.7;}
+.story{font-size:14px;color:var(--ink);line-height:1.7;background:#0a0f1c99;border:1px solid var(--edge);
+  border-radius:12px;padding:16px;margin:18px 0;text-align:left;}
+.story b{color:var(--hud);font-weight:600;}
+.btn{font-family:'Chakra Petch',sans-serif;font-weight:600;font-size:16px;padding:14px 28px;border:none;
+  border-radius:12px;cursor:pointer;background:linear-gradient(180deg,#2fd4ae,#1fa588);color:#04231c;
+  box-shadow:0 6px 0 #147a63,0 10px 30px #0af3;transition:transform .1s,box-shadow .1s;}
+.btn:active{transform:translateY(3px);box-shadow:0 3px 0 #147a63;}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--edge);box-shadow:none;}
+.btnrow{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:6px;}
+.controls-hint{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--muted);
+  margin-top:18px;line-height:2;}
+.controls-hint kbd{background:var(--edge);border-radius:4px;padding:1px 7px;color:var(--ink);font-size:11px;}
+button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-offset:3px;}
+
+/* mobile move pad */
+.mpad{position:absolute;bottom:80px;left:18px;z-index:10;width:132px;height:132px;display:none;
+  pointer-events:auto;}
+.mpad .stick{position:absolute;width:56px;height:56px;border-radius:50%;background:#8fe3ff33;
+  border:2px solid var(--hud);left:38px;top:38px;box-shadow:0 0 20px #0af4;}
+.mpad .ring{position:absolute;inset:0;border-radius:50%;background:#ffffff08;border:1px solid var(--edge);}
+.fire-btn{position:absolute;bottom:84px;right:18px;z-index:10;width:74px;height:74px;border-radius:50%;
+  background:#ff5a6e22;border:2px solid var(--danger);color:var(--danger);font-weight:700;font-size:13px;
+  display:none;align-items:center;justify-content:center;pointer-events:auto;box-shadow:0 0 20px #ff5a6e44;}
+@media (hover:none) and (pointer:coarse){ .mpad{display:block;} .fire-btn{display:flex;} .controls-hint.desk{display:none;} }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="cv"></canvas>
+
+  <!-- HUD -->
+  <div class="hud" id="hud" style="display:none">
+    <div class="bars">
+      <div class="bar hp"><div class="fill" id="hpFill"></div><div class="lab"><span>HULL</span><span id="hpTxt">100</span></div></div>
+      <div class="bar en"><div class="fill" id="enFill"></div><div class="lab"><span>ENERGY</span><span id="enTxt">100</span></div></div>
+    </div>
+    <div class="right-hud">
+      <div id="scrapTxt">◈ scrap 0</div>
+      <div id="partsTxt">⬡ ship parts 0 / 4</div>
+      <div class="obj" id="objTxt">▸ find shelter</div>
+    </div>
+  </div>
+
+  <!-- weapon slots -->
+  <div class="weapons" id="weapons" style="display:none"></div>
+
+  <!-- messages -->
+  <div class="log" id="log"></div>
+  <div class="prompt" id="prompt"></div>
+
+  <!-- dialog -->
+  <div class="dialog hidden" id="dialog">
+    <div class="who" id="dlgWho">LOG</div>
+    <div class="txt" id="dlgTxt"></div>
+    <div class="cont">tap / space to continue ▸</div>
+  </div>
+
+  <!-- workbench (upgrade shop at the ship) -->
+  <div class="dialog hidden" id="bench" style="bottom:auto;top:50%;transform:translate(-50%,-50%);">
+    <div class="who">SHIP WORKBENCH · ◈ <span id="benchScrap">0</span> scrap</div>
+    <div id="benchList" style="display:flex;flex-direction:column;gap:8px;margin:10px 0;"></div>
+    <div style="text-align:right;">
+      <button class="btn ghost" style="padding:9px 18px;font-size:13px;" onclick="closeBench()">close · esc</button>
+    </div>
+  </div>
+
+  <!-- mobile controls -->
+  <div class="mpad" id="mpad"><div class="ring"></div><div class="stick" id="stick"></div></div>
+  <button class="fire-btn" id="fireBtn">FIRE</button>
+
+  <!-- title screen -->
+  <div class="screen" id="titleScreen">
+    <div class="menu-card">
+      <div class="eyebrow">deep-survey vessel · aurora-9</div>
+      <div class="gtitle">SIGNAL <span class="lost">LOST</span></div>
+      <div class="gsub">crash site: kepler-7b · atmosphere: breathable · lifeforms: hostile</div>
+      <div class="story" id="introStory"></div>
+      <div class="btnrow">
+        <button class="btn" onclick="startGame()">▸ leave the wreck</button>
+        <button class="btn ghost" id="continueBtn" onclick="continueGame()" style="display:none">continue</button>
+      </div>
+      <div class="controls-hint desk">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; · &nbsp; <kbd>mouse</kbd> aim &nbsp; · &nbsp;
+        <kbd>click</kbd> attack &nbsp; · &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> weapons &nbsp; · &nbsp; <kbd>E</kbd> interact
+      </div>
+    </div>
+  </div>
+
+  <!-- death / win screen -->
+  <div class="screen hidden" id="endScreen">
+    <div class="menu-card">
+      <div class="eyebrow" id="endEyebrow">signal lost</div>
+      <div class="gtitle" id="endTitle" style="font-size:clamp(30px,7vw,48px)"></div>
+      <div class="story" id="endStory"></div>
+      <div class="btnrow">
+        <button class="btn" onclick="location.reload()">▸ try again</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==================================================================
+   SIGNAL LOST — top-down sci-fi survival
+   One file, no dependencies. Explore, fight, collect, escape.
+   ================================================================== */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let W,H,DPR;
+const SAVE='signallost_v1';
+
+/* ---------- world config ---------- */
+const TILE=40;                 // px per tile at base
+const MAP_W=76, MAP_H=76;      // world in tiles (bigger for more to explore)
+const T={GROUND:0,ROCK:1,CRYSTAL:2,WATER:3,GRASS:4,WRECK:5,METAL:6};
+let map=[];                    // tile grid
+let decor=[];                  // non-colliding visual bits {x,y,type}
+
+/* ---------- entities ---------- */
+let player, enemies=[], pickups=[], bullets=[], particles=[], structures=[];
+let cam={x:0,y:0};
+let keys={}, mouse={x:0,y:0,down:false};
+let running=false, paused=false;
+let time=0;
+
+/* ---------- story / progress ---------- */
+let scrap=0, shipParts=0, PARTS_NEEDED=6;
+let phase='parts';   // 'parts' -> 'core' -> 'escape' -> done
+let coreTaken=false, boss=null;
+let upg={dmg:0,hull:0,spd:0,cells:0};   // workbench upgrade levels
+let objective='find shelter';
+let storyFlags={};
+let dialogQueue=[], inDialog=false;
+
+/* ---------- weapons ---------- */
+const WEAPONS={
+  fists:{name:'fists',icon:'✊',type:'melee',dmg:8,range:34,cd:0.4,key:'—',ammo:null},
+  axe:  {name:'axe',  icon:'🪓',type:'melee',dmg:26,range:46,cd:0.55,key:'1',ammo:null,arc:1.1},
+  blaster:{name:'blaster',icon:'🔫',type:'ranged',dmg:18,range:9,cd:0.22,key:'2',ammo:0,ammoMax:999,cost:1,speed:520},
+  pulse:{name:'pulse rifle',icon:'🭬',type:'ranged',dmg:34,range:12,cd:0.5,key:'3',ammo:0,ammoMax:999,cost:1,speed:640,spread:0.05,burst:1}
+};
+let owned={fists:true,axe:false,blaster:false,pulse:false};
+let curWeapon='fists';
+
+/* ---------- rng ---------- */
+function rnd(a=1,b){if(b===undefined){b=a;a=0;}return a+Math.random()*(b-a);}
+function ri(a,b){return Math.floor(rnd(a,b+1));}
+function pick(a){return a[Math.floor(Math.random()*a.length)];}
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+
+/* ================= sizing ================= */
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=window.innerWidth;H=window.innerHeight;
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.imageSmoothingEnabled=false;
+}
+window.addEventListener('resize',resize);
+
+/* ================= world generation ================= */
+function genWorld(){
+  map=[];decor=[];structures=[];
+  for(let y=0;y<MAP_H;y++){map[y]=[];for(let x=0;x<MAP_W;x++)map[y][x]=T.GROUND;}
+  // scatter grass patches
+  for(let i=0;i<260;i++){const gx=ri(0,MAP_W-1),gy=ri(0,MAP_H-1);
+    blob(gx,gy,ri(1,3),T.GRASS);}
+  // rock formations (walls)
+  for(let i=0;i<70;i++){const gx=ri(2,MAP_W-3),gy=ri(2,MAP_H-3);
+    blob(gx,gy,ri(1,2),T.ROCK);}
+  // crystal clusters (mine for scrap)
+  for(let i=0;i<40;i++){const gx=ri(2,MAP_W-3),gy=ri(2,MAP_H-3);
+    if(map[gy][gx]===T.GROUND)map[gy][gx]=T.CRYSTAL;}
+  // water pools
+  for(let i=0;i<14;i++){const gx=ri(3,MAP_W-4),gy=ri(3,MAP_H-4);blob(gx,gy,ri(1,2),T.WATER);}
+  // border wall of rock
+  for(let x=0;x<MAP_W;x++){map[0][x]=T.ROCK;map[MAP_H-1][x]=T.ROCK;}
+  for(let y=0;y<MAP_H;y++){map[y][0]=T.ROCK;map[y][MAP_W-1]=T.ROCK;}
+
+  // decor motes
+  for(let i=0;i<400;i++)decor.push({x:rnd(MAP_W*TILE),y:rnd(MAP_H*TILE),type:pick(['mote','mote','pebble','fern'])});
+
+  // ---- the crash site (start), center-ish ----
+  const csx=Math.floor(MAP_W*0.5), csy=Math.floor(MAP_H*0.5);
+  carve(csx,csy,4);
+  map[csy][csx]=T.WRECK; map[csy][csx+1]=T.METAL; map[csy+1][csx]=T.METAL;
+  structures.push({type:'ship',x:(csx+.5)*TILE,y:(csy+.5)*TILE,r:44,label:'your ship — needs 6 parts'});
+  player.x=(csx+.5)*TILE; player.y=(csy+2)*TILE;
+
+  // ---- 6 debris sites spread across the map, tougher the farther out ----
+  const spots=[
+    {x:12,y:12},{x:MAP_W-13,y:12},{x:12,y:MAP_H-13},{x:MAP_W-13,y:MAP_H-13},
+    {x:Math.floor(MAP_W*0.5),y:9},{x:Math.floor(MAP_W*0.5),y:MAP_H-10}
+  ];
+  spots.forEach((s,i)=>{
+    carve(s.x,s.y,3);
+    structures.push({type:'wreck',x:(s.x+.5)*TILE,y:(s.y+.5)*TILE,r:34,
+      label:'debris field',hasPart:true,partId:i,looted:false});
+    // guardians — gentle at the first sites, nastier the higher the index
+    const guards=(i<2?2:ri(2,3)+Math.floor(i/2));
+    for(let k=0;k<guards;k++){
+      const kind = i>=4&&k===0 ? 'spitter' : (i>=2 ? (Math.random()<0.3?'spitter':'brute') : 'crawler');
+      spawnEnemy((s.x+rnd(-2,2))*TILE,(s.y+rnd(-2,2))*TILE, kind);
+    }
+    // supply caches — early sites drop meds/scrap; pulse rifle still hidden at site 3
+    if(i===0){pickups.push({x:(s.x+.5)*TILE,y:(s.y+1.4)*TILE,type:'medkit'});
+      pickups.push({x:(s.x+1.2)*TILE,y:(s.y+1.4)*TILE,type:'scrap'});}
+    if(i===1){pickups.push({x:(s.x+.5)*TILE,y:(s.y+1.4)*TILE,type:'scrap'});
+      pickups.push({x:(s.x+1.2)*TILE,y:(s.y+1.4)*TILE,type:'scrap'});}
+    if(i===3)pickups.push({x:(s.x+.5)*TILE,y:(s.y+1.4)*TILE,type:'pulse'});
+  });
+  // an old distress beacon (story) near center
+  structures.push({type:'beacon',x:(csx+6)*TILE,y:(csy-5)*TILE,r:30,label:'flickering beacon',read:false});
+  // starter supplies scattered around the crash — grab before heading out
+  pickups.push({x:(csx-2)*TILE,y:(csy+2.5)*TILE,type:'medkit'});
+  pickups.push({x:(csx+2.5)*TILE,y:(csy+2)*TILE,type:'scrap'});
+  pickups.push({x:(csx+1)*TILE,y:(csy+3.2)*TILE,type:'scrap'});
+
+  // ---- ACT 2: the alien core vault, sealed until all parts are found ----
+  const vx=8, vy=Math.floor(MAP_H*0.5);
+  carve(vx,vy,4);
+  structures.push({type:'vault',x:(vx+.5)*TILE,y:(vy+.5)*TILE,r:40,
+    label:'alien structure — sealed',opened:false});
+
+  // ambient enemies + scrap scattered
+  for(let i=0;i<22;i++){let ex,ey,tries=0;
+    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
+    if(dist({x:ex*TILE,y:ey*TILE},{x:player.x,y:player.y})>260){
+      const r=Math.random();
+      spawnEnemy(ex*TILE,ey*TILE, r<.2?'brute':r<.35?'spitter':'crawler');
+    }
+  }
+  for(let i=0;i<30;i++){let ex,ey,tries=0;
+    do{ex=ri(2,MAP_W-3);ey=ri(2,MAP_H-3);tries++;}while(solidTile(ex,ey)&&tries<20);
+    pickups.push({x:(ex+.5)*TILE,y:(ey+.5)*TILE,type:Math.random()<.3?'medkit':'scrap'});
+  }
+}
+function blob(gx,gy,r,t){for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){
+  if(x*x+y*y<=r*r){const nx=gx+x,ny=gy+y;
+    if(nx>0&&ny>0&&nx<MAP_W-1&&ny<MAP_H-1&&map[ny][nx]===T.GROUND)map[ny][nx]=t;}}}
+function carve(gx,gy,r){for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){
+  const nx=gx+x,ny=gy+y;if(nx>0&&ny>0&&nx<MAP_W-1&&ny<MAP_H-1&&x*x+y*y<=r*r)map[ny][nx]=T.GROUND;}}
+function solidTile(tx,ty){if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H)return true;
+  const t=map[ty][tx];return t===T.ROCK||t===T.WATER||t===T.CRYSTAL||t===T.WRECK;}
+function solidAt(px,py){return solidTile(Math.floor(px/TILE),Math.floor(py/TILE));}
+
+/* ================= entities ================= */
+function makePlayer(){return{x:0,y:0,r:13,hp:100,hpMax:100,en:100,enMax:100,
+  spd:150,face:0,atkCd:0,hurtCd:0,dead:false,walkT:0};}
+function spawnEnemy(x,y,kind){
+  const base={crawler:{hp:24,spd:70,dmg:8,r:12,color:'#a3e635',touch:0.6},
+              brute:{hp:70,spd:52,dmg:18,r:18,color:'#f472b6',touch:1.0},
+              spitter:{hp:34,spd:58,dmg:10,r:13,color:'#5eead4',touch:0.8,ranged:true}}[kind];
+  enemies.push({x,y,kind,...base,hpMax:base.hp,face:0,atkCd:0,stun:0,walkT:rnd(0,6),hitFlash:0,aggro:false,shootCd:rnd(1,2)});
+}
+function spawnBoss(x,y){
+  boss={x,y,kind:'keeper',hp:420,hpMax:420,spd:44,dmg:26,r:34,color:'#c084fc',touch:1.2,
+    face:0,atkCd:0,stun:0,walkT:0,hitFlash:0,aggro:true,shootCd:2,spawnCd:6};
+  enemies.push(boss);
+}
+
+/* ================= input ================= */
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  keys[k]=true;
+  if(k==='escape'&&paused){closeBench();return;}
+  if(inDialog&&(k===' '||k==='enter')){advanceDialog();e.preventDefault();return;}
+  if(['1','2','3'].includes(k)){selectByKey(k);}
+  if(k==='e')tryInteract();
+  if(k===' ')e.preventDefault();
+});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();mouse.x=e.clientX-r.left;mouse.y=e.clientY-r.top;});
+cv.addEventListener('mousedown',e=>{if(inDialog){advanceDialog();return;}mouse.down=true;});
+addEventListener('mouseup',()=>mouse.down=false);
+// mobile joystick
+const mpad=document.getElementById('mpad'),stick=document.getElementById('stick');
+let joy={active:false,dx:0,dy:0};
+mpad.addEventListener('pointerdown',e=>{joy.active=true;joyMove(e);});
+mpad.addEventListener('pointermove',e=>{if(joy.active)joyMove(e);});
+mpad.addEventListener('pointerup',()=>{joy.active=false;joy.dx=0;joy.dy=0;stick.style.left='38px';stick.style.top='38px';});
+function joyMove(e){const r=mpad.getBoundingClientRect();let dx=e.clientX-r.left-66,dy=e.clientY-r.top-66;
+  const d=Math.hypot(dx,dy),max=40;if(d>max){dx=dx/d*max;dy=dy/d*max;}
+  joy.dx=dx/max;joy.dy=dy/max;stick.style.left=(38+dx)+'px';stick.style.top=(38+dy)+'px';}
+document.getElementById('fireBtn').addEventListener('pointerdown',()=>{mouse.down=true;});
+document.getElementById('fireBtn').addEventListener('pointerup',()=>{mouse.down=false;});
+
+function selectByKey(k){for(const id in WEAPONS)if(WEAPONS[id].key===k&&owned[id]){curWeapon=id;renderWeapons();}}
+function selectWeapon(id){if(owned[id]){curWeapon=id;renderWeapons();}}
+
+/* ================= interaction ================= */
+let nearStruct=null;
+function tryInteract(){
+  if(!nearStruct)return;
+  const s=nearStruct;
+  if(s.type==='ship'){
+    if(phase==='escape'&&coreTaken){ winGame(); }
+    else if(shipParts>=PARTS_NEEDED&&phase==='parts'){
+      // all parts in — but the engine won't start. Act 2 begins.
+      phase='core';
+      say('SUIT AI','All six parts fitted... but the engine won\'t hold a charge. The cells are dead.');
+      say('SUIT AI','There\'s an alien power source west of here — the vault the old crew warned about. It\'s the only cell that\'ll fit. We have no choice.');
+      objective='reach the alien vault (west)';updateHUD();
+      // unseal the vault
+      const v=structures.find(st=>st.type==='vault');if(v){v.label='alien structure — unsealed';}
+    }
+    else { openBench(); }   // ship doubles as your upgrade workbench
+  } else if(s.type==='wreck'&&s.hasPart&&!s.looted){
+    s.looted=true; shipParts++; updateHUD(); sfx('part');
+    log('recovered a ship part! ('+shipParts+'/'+PARTS_NEEDED+')','ok');
+    burst(s.x,s.y,'#8fe3ff',20);
+    if(shipParts===1)say('SUIT AI','One part down. Five to go. The others are farther out — expect worse.');
+    if(shipParts===3)say('SUIT AI','Halfway. The swarm is thicker toward the edges. Keep your cells charged.');
+    if(shipParts===PARTS_NEEDED){objective='return to your ship';updateHUD();
+      say('SUIT AI','That\'s all six. Get back to the ship — let\'s see if she flies.');}
+    else{objective='find ship parts — '+shipParts+'/'+PARTS_NEEDED;updateHUD();}
+  } else if(s.type==='vault'){
+    if(phase!=='core'){ log('sealed tight — nothing to do here yet','warn'); return; }
+    if(!s.opened){
+      s.opened=true;
+      say('SUIT AI','It opened on its own. That\'s not comforting.');
+      say('???','THIEF. THE CORE IS OURS.');
+      say('SUIT AI','Something big just woke up. Whatever it is — put it down and take the core.');
+      objective='defeat the guardian';updateHUD();
+      // spawn the boss + core pickup guarded
+      spawnBoss(s.x,s.y-TILE*1.5);
+      sfx('boss');
+      shake=12;
+    } else if(coreTaken){ log('the vault is empty now','warn'); }
+    else { log('the guardian still stands — the core is protected','warn'); }
+  } else if(s.type==='beacon'&&!s.read){
+    s.read=true;
+    say('OLD BEACON','...survey team seven... the vault... it feeds on our engines... the core is alive... do not wake the keeper...');
+    say('SUIT AI','A previous crew. They didn\'t make it. Now we know why the vault matters — and what\'s guarding it.');
+  }
+}
+
+/* ================= workbench (upgrades) ================= */
+const UPGRADES=[
+  {id:'dmg',  icon:'⚔', name:'Weapon tuning', desc:'+20% damage per level', max:5, cost:l=>10+l*8},
+  {id:'hull', icon:'🛡', name:'Hull plating', desc:'+25 max hull per level (heals on buy)', max:5, cost:l=>12+l*8},
+  {id:'spd',  icon:'👟', name:'Servo boost', desc:'+12% move speed per level', max:4, cost:l=>10+l*10},
+  {id:'cells',icon:'⚡', name:'Cell efficiency', desc:'faster suit-energy regen per level', max:4, cost:l=>8+l*8},
+  {id:'ammo', icon:'◈', name:'Fabricate cells', desc:'+10 blaster / +6 pulse ammo (repeatable)', max:99, cost:()=>6},
+];
+function dmgMult(){return 1+upg.dmg*0.2;}
+function openBench(){
+  paused=true;
+  const box=document.getElementById('bench');
+  box.classList.remove('hidden');
+  renderBench();
+  if(phase==='core'&&!coreTaken)log('the engine still needs the alien core','warn');
+  else if(phase==='parts')log(`still missing ${PARTS_NEEDED-shipParts} hull part${PARTS_NEEDED-shipParts>1?'s':''}`,'warn');
+}
+function closeBench(){paused=false;document.getElementById('bench').classList.add('hidden');}
+function renderBench(){
+  document.getElementById('benchScrap').textContent=scrap;
+  const list=document.getElementById('benchList');list.innerHTML='';
+  UPGRADES.forEach(u=>{
+    const lv=u.id==='ammo'?0:upg[u.id];
+    const maxed=u.id!=='ammo'&&lv>=u.max;
+    const cost=u.cost(lv);
+    const row=document.createElement('div');row.className='brow';
+    row.innerHTML=`<span class="bi">${u.icon}</span>
+      <div class="bmeta"><div class="bname">${u.name} ${u.id!=='ammo'?`<span class="blv">lv ${lv}${maxed?' · MAX':''}</span>`:''}</div>
+      <div class="bdesc">${u.desc}</div></div>`;
+    const btn=document.createElement('button');
+    btn.textContent=maxed?'MAX':'◈ '+cost;
+    btn.disabled=maxed||scrap<cost;
+    btn.onclick=()=>buyUpgrade(u.id);
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
+function buyUpgrade(id){
+  const u=UPGRADES.find(x=>x.id===id);
+  const lv=id==='ammo'?0:upg[id];
+  if(id!=='ammo'&&lv>=u.max)return;
+  const cost=u.cost(lv);
+  if(scrap<cost){log('not enough scrap','warn');return;}
+  scrap-=cost;
+  if(id==='dmg')upg.dmg++;
+  else if(id==='hull'){upg.hull++;player.hpMax=100+upg.hull*25;player.hp=player.hpMax;}
+  else if(id==='spd'){upg.spd++;player.spd=150*(1+upg.spd*0.12);}
+  else if(id==='cells')upg.cells++;
+  else if(id==='ammo'){WEAPONS.blaster.ammo+=10;WEAPONS.pulse.ammo+=6;renderWeapons();}
+  sfx('buy');
+  updateHUD();renderBench();
+  log(u.name+' installed','ok');
+}
+
+/* ================= combat ================= */
+function attack(){
+  const wp=WEAPONS[curWeapon];
+  if(player.atkCd>0)return;
+  if(wp.type==='melee'){
+    player.atkCd=wp.cd;
+    swing(wp);
+  } else {
+    if(wp.ammo<=0){log('out of energy cells — pick up more scrap','warn');return;}
+    if(player.en<3){log('suit energy too low to fire','warn');return;}
+    player.atkCd=wp.cd; wp.ammo-=wp.cost; player.en=Math.max(0,player.en-2);
+    fire(wp); renderWeapons();
+  }
+}
+function swing(wp){
+  sfx('swing');
+  // hit all enemies within arc in front
+  const arc=wp.arc||0.9;
+  particles.push({kind:'slash',x:player.x,y:player.y,face:player.face,life:0.18,max:0.18,range:wp.range});
+  let hit=false;
+  enemies.forEach(e=>{
+    const d=dist(player,e);
+    if(d<wp.range+e.r){
+      const ang=Math.atan2(e.y-player.y,e.x-player.x);
+      let diff=Math.abs(((ang-player.face+Math.PI)%(2*Math.PI))-Math.PI);
+      if(diff<arc){hurtEnemy(e,wp.dmg*dmgMult());hit=true;
+        e.x+=Math.cos(ang)*12;e.y+=Math.sin(ang)*12;}
+    }
+  });
+  // mine crystals with axe
+  if(curWeapon==='axe'){
+    const tx=Math.floor((player.x+Math.cos(player.face)*wp.range)/TILE);
+    const ty=Math.floor((player.y+Math.sin(player.face)*wp.range)/TILE);
+    if(map[ty]&&map[ty][tx]===T.CRYSTAL){map[ty][tx]=T.GROUND;
+      pickups.push({x:(tx+.5)*TILE,y:(ty+.5)*TILE,type:'scrap',vy:-1});
+      burst((tx+.5)*TILE,(ty+.5)*TILE,'#8fe3ff',10);}
+  }
+}
+function fire(wp){
+  sfx(curWeapon==='pulse'?'pulse':'shoot');
+  const n=wp.burst||1;
+  for(let i=0;i<n;i++){
+    const spread=(wp.spread||0)*(Math.random()-0.5)*2;
+    const a=player.face+spread;
+    bullets.push({x:player.x+Math.cos(a)*16,y:player.y+Math.sin(a)*16,
+      vx:Math.cos(a)*wp.speed,vy:Math.sin(a)*wp.speed,dmg:wp.dmg*dmgMult(),life:wp.range/ (wp.speed/TILE) *0.5+0.4,
+      color:curWeapon==='pulse'?'#ffb454':'#8fe3ff'});
+  }
+  // muzzle flash
+  burst(player.x+Math.cos(player.face)*18,player.y+Math.sin(player.face)*18,'#fff',4);
+}
+function hurtEnemy(e,dmg){
+  sfx('hit');
+  e.hp-=dmg;e.hitFlash=0.12;e.aggro=true;
+  if(e.kind!=='keeper')e.stun=0.08;   // boss shrugs off stagger
+  burst(e.x,e.y,e.color,6);
+  if(e.hp<=0){
+    burst(e.x,e.y,e.color,e.kind==='keeper'?60:18);
+    sfx('die');
+    if(e.kind==='keeper'){
+      boss=null;shake=14;
+      // the core drops where the boss fell
+      pickups.push({x:e.x,y:e.y,type:'core'});
+      say('SUIT AI','It\'s down. The core it was guarding — grab it and run for the ship.');
+      objective='take the alien core';updateHUD();
+    } else {
+      if(Math.random()<0.5)pickups.push({x:e.x,y:e.y,type:Math.random()<0.4?'medkit':'scrap'});
+    }
+    enemies=enemies.filter(x=>x!==e);
+  }
+}
+function hurtPlayer(dmg){
+  if(player.hurtCd>0)return;
+  sfx('hurt');
+  player.hp-=dmg;player.hurtCd=0.6;
+  burst(player.x,player.y,'#ff5a6e',10);
+  shake=6;
+  if(player.hp<=0){player.hp=0;player.dead=true;loseGame();}
+  updateHUD();
+}
+
+/* ================= pickups ================= */
+function collect(p){
+  sfx(p.type==='core'?'part':'pickup');
+  if(p.type==='scrap'){scrap+=ri(2,5);
+    // scrap refills blaster/pulse ammo (energy cells)
+    WEAPONS.blaster.ammo+=3;WEAPONS.pulse.ammo+=2;
+    log('+scrap · energy cells replenished','ok');updateHUD();renderWeapons();}
+  else if(p.type==='medkit'){player.hp=Math.min(player.hpMax,player.hp+30);
+    log('+30 hull','ok');updateHUD();}
+  else if(p.type==='axe'){owned.axe=true;curWeapon='axe';
+    say('SUIT AI','Salvage axe. Good for close work — and for cutting those crystals into fuel.');
+    renderWeapons();}
+  else if(p.type==='blaster'){owned.blaster=true;WEAPONS.blaster.ammo+=12;curWeapon='blaster';
+    say('SUIT AI','Plasma blaster online. Costs energy per shot — scrap tops up the cells.');
+    renderWeapons();}
+  else if(p.type==='pulse'){owned.pulse=true;WEAPONS.pulse.ammo+=10;
+    say('SUIT AI','A pulse rifle. Whoever hid this out here knew what was coming.');
+    renderWeapons();}
+  else if(p.type==='core'){coreTaken=true;phase='escape';
+    say('SUIT AI','Core secured — it\'s warm, and it\'s pulling toward the ship like it wants to go home.');
+    say('SUIT AI','Get to the ship and board. This is our one shot off Kepler-7b.');
+    objective='return to the ship and escape';updateHUD();
+    burst(p.x,p.y,'#c084fc',30);shake=8;}
+  burst(p.x,p.y,'#fff',8);
+  pickups=pickups.filter(x=>x!==p);
+}
+
+/* ================= sound (tiny WebAudio synth, no assets) ================= */
+let AC=null, muted=false;
+function ac(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}return AC;}
+function tone(freq,dur,type='square',vol=0.08,slide=0){
+  const a=ac();if(!a||muted)return;
+  const o=a.createOscillator(),g=a.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,a.currentTime);
+  if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(30,freq+slide),a.currentTime+dur);
+  g.gain.setValueAtTime(vol,a.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001,a.currentTime+dur);
+  o.connect(g);g.connect(a.destination);
+  o.start();o.stop(a.currentTime+dur);
+}
+function sfx(name){
+  switch(name){
+    case 'shoot': tone(880,0.08,'square',0.05,-500);break;
+    case 'pulse': tone(320,0.14,'sawtooth',0.07,-180);break;
+    case 'swing': tone(180,0.09,'triangle',0.06,120);break;
+    case 'hit':   tone(140,0.1,'square',0.07,-60);break;
+    case 'hurt':  tone(110,0.22,'sawtooth',0.09,-70);break;
+    case 'die':   tone(220,0.35,'sawtooth',0.08,-180);break;
+    case 'pickup':tone(660,0.09,'sine',0.06,220);setTimeout(()=>tone(990,0.1,'sine',0.05),70);break;
+    case 'part':  tone(523,0.12,'sine',0.07);setTimeout(()=>tone(659,0.12,'sine',0.07),110);
+                  setTimeout(()=>tone(784,0.2,'sine',0.07),220);break;
+    case 'buy':   tone(740,0.07,'square',0.05,140);break;
+    case 'spit':  tone(420,0.1,'triangle',0.05,-200);break;
+    case 'boss':  tone(80,0.6,'sawtooth',0.12,-30);setTimeout(()=>tone(60,0.7,'sawtooth',0.12),300);break;
+    case 'win':   [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.25,'sine',0.08),i*160));break;
+    case 'lose':  [330,262,196,131].forEach((f,i)=>setTimeout(()=>tone(f,0.3,'sawtooth',0.07),i*200));break;
+  }
+}
+
+/* ================= update ================= */
+let shake=0;
+function update(dt){
+  time+=dt;
+  if(inDialog)return;
+  // movement
+  let mx=0,my=0;
+  if(keys['w']||keys['arrowup'])my-=1;
+  if(keys['s']||keys['arrowdown'])my+=1;
+  if(keys['a']||keys['arrowleft'])mx-=1;
+  if(keys['d']||keys['arrowright'])mx+=1;
+  if(joy.active){mx+=joy.dx;my+=joy.dy;}
+  const ml=Math.hypot(mx,my);
+  if(ml>0){mx/=ml;my/=ml;
+    const nx=player.x+mx*player.spd*dt, ny=player.y+my*player.spd*dt;
+    if(!solidAt(nx,player.y+ (my>0?player.r:-player.r)) && !solidAt(nx+(mx>0?player.r:-player.r),player.y))player.x=nx;
+    if(!solidAt(player.x,ny+(my>0?player.r:-player.r)) && !solidAt(player.x+(mx>0?player.r:-player.r),ny))player.y=ny;
+    player.x=clamp(player.x,TILE,(MAP_W-1)*TILE);player.y=clamp(player.y,TILE,(MAP_H-1)*TILE);
+    player.walkT+=dt*10;
+  }
+  // aim (desktop = mouse; mobile = movement dir)
+  if(!('ontouchstart'in window)||mouse.x){player.face=Math.atan2((mouse.y-H/2),(mouse.x-W/2));}
+  if(joy.active&&ml>0)player.face=Math.atan2(my,mx);
+  // energy regen (faster with cell upgrades)
+  player.en=Math.min(player.enMax,player.en+dt*(8+upg.cells*4));
+  if(player.atkCd>0)player.atkCd-=dt;
+  if(player.hurtCd>0)player.hurtCd-=dt;
+  // attack
+  if(mouse.down)attack();
+
+  // bullets
+  bullets.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+    if(solidAt(b.x,b.y)){b.life=0;burst(b.x,b.y,b.color,4);}
+    if(b.enemy){
+      if(b.life>0&&dist(b,player)<player.r+3){hurtPlayer(b.dmg);b.life=0;}
+    } else {
+      enemies.forEach(e=>{if(b.life>0&&dist(b,e)<e.r+3){hurtEnemy(e,b.dmg);b.life=0;}});
+    }
+  });
+  bullets=bullets.filter(b=>b.life>0);
+
+  // enemies AI
+  enemies.forEach(e=>{
+    if(e.hitFlash>0)e.hitFlash-=dt;
+    if(e.stun>0){e.stun-=dt;return;}
+    const d=dist(e,player);
+    if(d<300)e.aggro=true;
+    if(e.aggro&&d>16){
+      const a=Math.atan2(player.y-e.y,player.x-e.x);e.face=a;
+      // spitters hold at range; everyone else closes in
+      const wantClose = !e.ranged || d>180;
+      const wantBack  = e.ranged && d<110;
+      const dir = wantBack?-1:(wantClose?1:0);
+      if(dir!==0){
+        const nx=e.x+Math.cos(a)*e.spd*dt*dir, ny=e.y+Math.sin(a)*e.spd*dt*dir;
+        if(!solidAt(nx,e.y))e.x=nx; if(!solidAt(e.x,ny))e.y=ny;
+        e.walkT+=dt*8;
+      }
+      // spit acid when in band
+      if(e.ranged){e.shootCd-=dt;
+        if(e.shootCd<=0&&d<260){e.shootCd=1.8;
+          bullets.push({x:e.x,y:e.y,vx:Math.cos(a)*220,vy:Math.sin(a)*220,
+            dmg:e.dmg,life:1.6,color:'#5eead4',enemy:true});
+          sfx('spit');
+        }}
+    }
+    // touch damage
+    if(d<e.r+player.r+2){if(e.atkCd<=0){hurtPlayer(e.dmg);e.atkCd=e.touch;}}
+    if(e.atkCd>0)e.atkCd-=dt;
+    // ---- boss special attacks ----
+    if(e.kind==='keeper'){
+      e.shootCd-=dt; e.spawnCd-=dt;
+      if(e.shootCd<=0){e.shootCd=1.6;
+        // three-way fireball spread at the player
+        const a0=Math.atan2(player.y-e.y,player.x-e.x);
+        [-0.25,0,0.25].forEach(off=>{
+          bullets.push({x:e.x,y:e.y,vx:Math.cos(a0+off)*300,vy:Math.sin(a0+off)*300,
+            dmg:16,life:2.2,color:'#c084fc',enemy:true});
+        });
+      }
+      if(e.spawnCd<=0 && enemies.length<10){e.spawnCd=7;
+        for(let k=0;k<2;k++)spawnEnemy(e.x+rnd(-40,40),e.y+rnd(-40,40),'crawler');
+        log('the keeper summons more!','danger');
+      }
+    }
+  });
+
+  // pickups (float + collect)
+  pickups.forEach(p=>{if(dist(p,player)<player.r+12)collect(p);});
+
+  // nearest interactable structure
+  nearStruct=null;let best=1e9;
+  structures.forEach(s=>{const d=dist(s,player);
+    const usable=(s.type==='ship')||(s.type==='wreck'&&s.hasPart&&!s.looted)||(s.type==='beacon'&&!s.read)||
+      (s.type==='vault'&&phase==='core'&&!coreTaken);
+    if(usable&&d<s.r+player.r+8&&d<best){best=d;nearStruct=s;}});
+  const pr=document.getElementById('prompt');
+  if(nearStruct){pr.classList.add('show');
+    pr.innerHTML=(nearStruct.type==='ship'?'<b>E</b> · board ship':
+      nearStruct.type==='beacon'?'<b>E</b> · read beacon':
+      nearStruct.type==='vault'?'<b>E</b> · enter vault':'<b>E</b> · search debris');}
+  else pr.classList.remove('show');
+
+  // particles
+  particles.forEach(p=>{p.life-=dt;if(p.vx){p.x+=p.vx*dt;p.y+=p.vy*dt;}});
+  particles=particles.filter(p=>p.life>0);
+
+  if(shake>0)shake-=dt*30;
+
+  // camera follows player (smooth)
+  cam.x+=((player.x-W/2)-cam.x)*Math.min(1,dt*8);
+  cam.y+=((player.y-H/2)-cam.y)*Math.min(1,dt*8);
+}
+
+/* ================= particles ================= */
+function burst(x,y,color,n){for(let i=0;i<n;i++){const a=rnd(0,6.28),s=rnd(30,140);
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rnd(.2,.5),max:.5,color,r:rnd(1.5,3.5)});}}
+
+/* ================= render ================= */
+function tileColor(t,x,y){
+  switch(t){
+    case T.GROUND: return ((x+y)&1)?'#182036':'#1a2338';
+    case T.GRASS:  return ((x+y)&1)?'#1e3a2e':'#22422f';
+    case T.ROCK:   return '#39445e';
+    case T.CRYSTAL:return '#2a3a6a';
+    case T.WATER:  return '#123a55';
+    case T.WRECK:  return '#4a3540';
+    case T.METAL:  return '#3a4358';
+    default:return '#1a2338';
+  }
+}
+function render(){
+  ctx.clearRect(0,0,W,H);
+  const ox=Math.round(cam.x-(shake>0?rnd(-shake,shake):0)), oy=Math.round(cam.y-(shake>0?rnd(-shake,shake):0));
+  // visible tile range
+  const x0=Math.max(0,Math.floor(ox/TILE)), x1=Math.min(MAP_W-1,Math.ceil((ox+W)/TILE));
+  const y0=Math.max(0,Math.floor(oy/TILE)), y1=Math.min(MAP_H-1,Math.ceil((oy+H)/TILE));
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+    const t=map[y][x];const sx=x*TILE-ox, sy=y*TILE-oy;
+    ctx.fillStyle=tileColor(t,x,y);ctx.fillRect(sx,sy,TILE,TILE);
+    if(t===T.CRYSTAL){ctx.fillStyle='#7fd8ff';ctx.beginPath();
+      ctx.moveTo(sx+TILE/2,sy+6);ctx.lineTo(sx+TILE-8,sy+TILE/2);ctx.lineTo(sx+TILE/2,sy+TILE-6);ctx.lineTo(sx+8,sy+TILE/2);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#cdefff';ctx.fillRect(sx+TILE/2-2,sy+10,4,TILE-20);}
+    if(t===T.ROCK){ctx.fillStyle='#2b3450';
+      ctx.fillRect(sx+4,sy+4,TILE-8,TILE-8);ctx.fillStyle='#454f6e';ctx.fillRect(sx+6,sy+6,TILE-16,6);}
+    if(t===T.WATER){ctx.fillStyle='rgba(120,200,255,'+(0.1+0.05*Math.sin(time*2+x+y))+')';ctx.fillRect(sx,sy,TILE,TILE);}
+  }
+  // decor motes
+  decor.forEach(d=>{const sx=d.x-ox,sy=d.y-oy;if(sx<-10||sy<-10||sx>W+10||sy>H+10)return;
+    if(d.type==='mote'){ctx.globalAlpha=0.25+0.2*Math.sin(time+d.x);ctx.fillStyle='#7fd8ff';
+      ctx.fillRect(sx,sy,2,2);ctx.globalAlpha=1;}
+    else if(d.type==='fern'){ctx.fillStyle='#2e5a44';ctx.fillRect(sx,sy,3,6);}
+    else{ctx.fillStyle='#2a3450';ctx.fillRect(sx,sy,4,3);}});
+
+  // structures
+  structures.forEach(s=>{const sx=s.x-ox,sy=s.y-oy;if(sx<-60||sy<-60||sx>W+60||sy>H+60)return;
+    if(s.type==='ship'){drawShip(sx,sy);}
+    else if(s.type==='wreck'){ctx.fillStyle=s.looted?'#2a3245':'#5a4a3a';
+      ctx.fillRect(sx-20,sy-14,40,28);ctx.fillStyle='#6a5a48';ctx.fillRect(sx-14,sy-20,10,12);
+      ctx.fillStyle='#3a4358';ctx.fillRect(sx+4,sy-18,12,10);
+      if(!s.looted){ctx.fillStyle='#8fe3ff';ctx.globalAlpha=.4+.3*Math.sin(time*4);
+        ctx.beginPath();ctx.arc(sx,sy,26,0,6.28);ctx.fill();ctx.globalAlpha=1;}}
+    else if(s.type==='beacon'){ctx.fillStyle='#333c54';ctx.fillRect(sx-4,sy-4,8,26);
+      ctx.fillStyle=s.read?'#556':'#ffb454';ctx.globalAlpha=s.read?1:(.4+.5*Math.abs(Math.sin(time*3)));
+      ctx.beginPath();ctx.arc(sx,sy-10,6,0,6.28);ctx.fill();ctx.globalAlpha=1;}
+    else if(s.type==='vault'){
+      // alien monolith
+      ctx.fillStyle='#241b38';ctx.fillRect(sx-26,sy-34,52,60);
+      ctx.fillStyle='#2f2450';ctx.fillRect(sx-20,sy-28,40,48);
+      const open=s.opened;
+      ctx.fillStyle=open?'#0a0d16':'#1a1030';
+      ctx.fillRect(sx-12,sy-20,24,40); // doorway
+      // glowing glyphs
+      ctx.fillStyle=phase==='core'&&!open?'#c084fc':(open?'#3a2a55':'#4a3a6a');
+      ctx.globalAlpha=phase==='core'&&!open?(.5+.5*Math.abs(Math.sin(time*2))):1;
+      for(let i=0;i<3;i++)ctx.fillRect(sx-16,sy-24+i*14,32,3);
+      ctx.globalAlpha=1;
+    }
+  });
+
+  // pickups
+  pickups.forEach(p=>{const sx=p.x-ox,sy=p.y-oy;if(sx<-20||sy<-20||sx>W+20||sy>H+20)return;
+    const bob=Math.sin(time*3+p.x)*3;
+    const icon={scrap:'◈',medkit:'✚',axe:'🪓',blaster:'🔫',pulse:'🭬',core:'❂'}[p.type];
+    if(p.type==='core'){ // pulsing alien core
+      ctx.globalAlpha=.3+.3*Math.sin(time*4);ctx.fillStyle='#c084fc';
+      ctx.beginPath();ctx.arc(sx,sy+bob,18,0,6.28);ctx.fill();ctx.globalAlpha=1;
+      ctx.fillStyle='#e9d5ff';ctx.font='22px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('❂',sx,sy+bob);return;}
+    ctx.globalAlpha=.5;ctx.fillStyle='#8fe3ff';ctx.beginPath();ctx.arc(sx,sy+bob+4,4,0,6.28);ctx.fill();ctx.globalAlpha=1;
+    ctx.font='18px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    if(p.type==='scrap'){ctx.fillStyle='#8fe3ff';ctx.fillText('◈',sx,sy+bob);}
+    else if(p.type==='medkit'){ctx.fillStyle='#7fe86b';ctx.fillText('✚',sx,sy+bob);}
+    else{ctx.fillText(icon,sx,sy+bob);}
+  });
+
+  // bullets
+  bullets.forEach(b=>{const sx=b.x-ox,sy=b.y-oy;
+    ctx.fillStyle=b.color;ctx.shadowColor=b.color;ctx.shadowBlur=8;
+    ctx.beginPath();ctx.arc(sx,sy,3,0,6.28);ctx.fill();ctx.shadowBlur=0;});
+
+  // enemies
+  enemies.forEach(e=>{const sx=e.x-ox,sy=e.y-oy;if(sx<-40||sy<-40||sx>W+40||sy>H+40)return;
+    drawEnemy(e,sx,sy);});
+
+  // player
+  drawPlayer(player.x-ox,player.y-oy);
+
+  // particles
+  particles.forEach(p=>{const sx=p.x-ox,sy=p.y-oy;
+    if(p.kind==='slash'){ctx.strokeStyle='rgba(255,255,255,'+(p.life/p.max)+')';ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(sx,sy,p.range,p.face-0.9,p.face+0.9);ctx.stroke();}
+    else{ctx.globalAlpha=p.life/p.max;ctx.fillStyle=p.color;
+      ctx.beginPath();ctx.arc(sx,sy,p.r||2,0,6.28);ctx.fill();ctx.globalAlpha=1;}});
+
+  // vignette
+  const vg=ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.75);
+  vg.addColorStop(0,'transparent');vg.addColorStop(1,'#04060bcc');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+
+  drawWaypoints(ox,oy);
+  drawMinimap();
+
+  // boss health bar
+  if(boss){
+    const bw=Math.min(420,W*0.7), bx=(W-bw)/2, by=54;
+    ctx.fillStyle='#0a0f1cdd';ctx.fillRect(bx-2,by-2,bw+4,20);
+    ctx.strokeStyle='#c084fc';ctx.lineWidth=1;ctx.strokeRect(bx-2,by-2,bw+4,20);
+    ctx.fillStyle='#3a1d3a';ctx.fillRect(bx,by,bw,16);
+    ctx.fillStyle='#c084fc';ctx.fillRect(bx,by,bw*(boss.hp/boss.hpMax),16);
+    ctx.fillStyle='#fff';ctx.font='11px "Share Tech Mono",monospace';ctx.textAlign='center';
+    ctx.fillText('THE KEEPER',W/2,by+12);
+  }
+}
+
+/* ---- current objective targets (where the arrows/minimap point) ---- */
+function objectiveTargets(){
+  const out=[];
+  if(phase==='parts'){
+    structures.forEach(s=>{if(s.type==='wreck'&&s.hasPart&&!s.looted)out.push({x:s.x,y:s.y,c:'#8fe3ff',kind:'part'});});
+    if(shipParts>=PARTS_NEEDED)out.push({x:shipObj().x,y:shipObj().y,c:'#7fe86b',kind:'ship'});
+  } else if(phase==='core'){
+    const v=structures.find(s=>s.type==='vault');
+    if(v)out.push({x:v.x,y:v.y,c:'#c084fc',kind:'vault'});
+    if(boss)out.push({x:boss.x,y:boss.y,c:'#ff5a6e',kind:'boss'});
+    pickups.forEach(p=>{if(p.type==='core')out.push({x:p.x,y:p.y,c:'#c084fc',kind:'core'});});
+  } else if(phase==='escape'){
+    pickups.forEach(p=>{if(p.type==='core')out.push({x:p.x,y:p.y,c:'#c084fc',kind:'core'});});
+    out.push({x:shipObj().x,y:shipObj().y,c:'#7fe86b',kind:'ship'});
+  }
+  return out;
+}
+function shipObj(){return structures.find(s=>s.type==='ship');}
+
+function drawWaypoints(ox,oy){
+  const targets=objectiveTargets();
+  const cxs=W/2, cys=H/2, margin=54;
+  targets.forEach(t=>{
+    const sx=t.x-ox, sy=t.y-oy;
+    const onScreen = sx>0&&sx<W&&sy>0&&sy<H;
+    const d=Math.round(dist(player,t)/TILE);
+    if(onScreen){
+      // small diamond above the target + distance
+      ctx.save();ctx.globalAlpha=0.5+0.4*Math.sin(time*4);
+      ctx.fillStyle=t.c;ctx.translate(sx,sy-42);ctx.rotate(Math.PI/4);
+      ctx.fillRect(-5,-5,10,10);ctx.restore();
+      ctx.fillStyle=t.c;ctx.font='11px "Share Tech Mono",monospace';ctx.textAlign='center';
+      ctx.fillText(d+'m',sx,sy-52);
+    } else {
+      // clamp an arrow to the screen edge pointing toward it
+      const ang=Math.atan2(sy-cys,sx-cxs);
+      let ex=cxs+Math.cos(ang)*(Math.min(W,H)/2-margin);
+      let ey=cys+Math.sin(ang)*(Math.min(W,H)/2-margin);
+      ex=clamp(ex,margin,W-margin);ey=clamp(ey,margin,H-margin);
+      ctx.save();ctx.translate(ex,ey);ctx.rotate(ang);
+      ctx.fillStyle=t.c;ctx.shadowColor=t.c;ctx.shadowBlur=10;
+      ctx.beginPath();ctx.moveTo(12,0);ctx.lineTo(-8,-8);ctx.lineTo(-8,8);ctx.closePath();ctx.fill();
+      ctx.restore();
+      ctx.fillStyle=t.c;ctx.font='10px "Share Tech Mono",monospace';ctx.textAlign='center';
+      ctx.fillText(d+'m',ex,ey+22);
+    }
+  });
+}
+function drawMinimap(){
+  const S=Math.min(120,W*0.28), pad=14;
+  const mx=W-S-pad, my=H-S-pad;
+  const sc=S/(MAP_W*TILE);
+  ctx.save();
+  ctx.globalAlpha=0.82;
+  ctx.fillStyle='#0a0f1c';ctx.fillRect(mx-2,my-2,S+4,S+4);
+  ctx.strokeStyle='#2b3854';ctx.lineWidth=1;ctx.strokeRect(mx-2,my-2,S+4,S+4);
+  // rough terrain: only rock + water sampled sparsely
+  for(let y=0;y<MAP_H;y+=2)for(let x=0;x<MAP_W;x+=2){
+    const t=map[y][x];
+    if(t===T.ROCK){ctx.fillStyle='#2b3450';ctx.fillRect(mx+x*TILE*sc,my+y*TILE*sc,2,2);}
+    else if(t===T.WATER){ctx.fillStyle='#123a55';ctx.fillRect(mx+x*TILE*sc,my+y*TILE*sc,2,2);}
+  }
+  // objective blips
+  objectiveTargets().forEach(t=>{
+    ctx.fillStyle=t.c;ctx.globalAlpha=0.6+0.4*Math.sin(time*5);
+    ctx.beginPath();ctx.arc(mx+t.x*sc,my+t.y*sc,3,0,6.28);ctx.fill();ctx.globalAlpha=0.82;
+  });
+  // ship (home) marker always
+  const sh=shipObj();if(sh){ctx.strokeStyle='#7fe86b';ctx.lineWidth=1.5;
+    ctx.strokeRect(mx+sh.x*sc-3,my+sh.y*sc-3,6,6);}
+  // player
+  ctx.fillStyle='#5fd0e8';ctx.beginPath();ctx.arc(mx+player.x*sc,my+player.y*sc,2.5,0,6.28);ctx.fill();
+  ctx.restore();
+}
+function drawPlayer(x,y){
+  const bob=Math.sin(player.walkT)*2;
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.ellipse(x,y+12,12,5,0,0,6.28);ctx.fill();
+  // body (suit)
+  ctx.fillStyle=player.hurtCd>0.4?'#ff9aa5':'#5fd0e8';
+  ctx.fillRect(x-9,y-12+bob,18,22);
+  ctx.fillStyle='#2b3854';ctx.fillRect(x-9,y-2+bob,18,4); // belt
+  // helmet
+  ctx.fillStyle='#dff4ff';ctx.beginPath();ctx.arc(x,y-12+bob,8,0,6.28);ctx.fill();
+  ctx.fillStyle='#1a2f45';ctx.beginPath();ctx.arc(x+2,y-12+bob,5,0,6.28);ctx.fill(); // visor
+  // weapon indicator
+  const wx=x+Math.cos(player.face)*16,wy=y+Math.sin(player.face)*16;
+  ctx.strokeStyle='#8fe3ff';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x,y+bob);ctx.lineTo(wx,wy+bob);ctx.stroke();
+  ctx.fillStyle='#8fe3ff';ctx.beginPath();ctx.arc(wx,wy+bob,2.5,0,6.28);ctx.fill();
+}
+function drawEnemy(e,x,y){
+  const bob=Math.sin(e.walkT)*2;
+  ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(x,y+e.r*0.7,e.r*0.8,e.r*0.35,0,0,6.28);ctx.fill();
+  const col=e.hitFlash>0?'#fff':e.color;
+  if(e.kind==='keeper'){
+    // large armored guardian with a glowing core
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y+bob,e.r,0,6.28);ctx.fill();
+    // spiked crown
+    ctx.strokeStyle=col;ctx.lineWidth=4;
+    for(let i=0;i<8;i++){const a=i/8*6.28+time*0.4;
+      ctx.beginPath();ctx.moveTo(x+Math.cos(a)*e.r,y+bob+Math.sin(a)*e.r);
+      ctx.lineTo(x+Math.cos(a)*(e.r+12),y+bob+Math.sin(a)*(e.r+12));ctx.stroke();}
+    // pulsing core eye
+    ctx.fillStyle='#fff';ctx.globalAlpha=.6+.4*Math.sin(time*6);
+    ctx.beginPath();ctx.arc(x,y+bob,e.r*0.4,0,6.28);ctx.fill();ctx.globalAlpha=1;
+    ctx.fillStyle='#e9d5ff';ctx.beginPath();ctx.arc(x,y+bob,e.r*0.2,0,6.28);ctx.fill();
+    return;
+  }
+  if(e.kind==='crawler'){
+    ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(x,y+bob,e.r,e.r*0.8,0,0,6.28);ctx.fill();
+    ctx.strokeStyle=col;ctx.lineWidth=2;for(let i=-1;i<=1;i++){
+      ctx.beginPath();ctx.moveTo(x-e.r,y+bob+i*4);ctx.lineTo(x-e.r-5,y+bob+i*5);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(x+e.r,y+bob+i*4);ctx.lineTo(x+e.r+5,y+bob+i*5);ctx.stroke();}
+    ctx.fillStyle='#0a0d16';ctx.beginPath();ctx.arc(x-3,y-2+bob,2,0,6.28);ctx.arc(x+3,y-2+bob,2,0,6.28);ctx.fill();
+  } else if(e.kind==='spitter'){
+    // teal spitter: teardrop body with a glowing throat sac
+    ctx.fillStyle=col;
+    ctx.beginPath();ctx.moveTo(x,y-e.r-4+bob);
+    ctx.quadraticCurveTo(x+e.r+3,y+bob,x,y+e.r+bob);
+    ctx.quadraticCurveTo(x-e.r-3,y+bob,x,y-e.r-4+bob);ctx.fill();
+    // sac pulses just before firing
+    const charge=1-clamp(e.shootCd/1.8,0,1);
+    ctx.fillStyle='#ccfff4';ctx.globalAlpha=0.35+0.6*charge;
+    ctx.beginPath();ctx.arc(x,y+3+bob,4+charge*4,0,6.28);ctx.fill();ctx.globalAlpha=1;
+    ctx.fillStyle='#0a0d16';ctx.beginPath();ctx.arc(x-3,y-5+bob,1.8,0,6.28);ctx.arc(x+3,y-5+bob,1.8,0,6.28);ctx.fill();
+  } else {
+    ctx.fillStyle=col;ctx.fillRect(x-e.r,y-e.r+bob,e.r*2,e.r*2);
+    ctx.fillStyle='#0a0d16';ctx.fillRect(x-e.r*0.5,y-e.r*0.4+bob,e.r*0.3,e.r*0.3);
+    ctx.fillRect(x+e.r*0.2,y-e.r*0.4+bob,e.r*0.3,e.r*0.3);
+    ctx.fillStyle=col;for(let i=0;i<3;i++)ctx.fillRect(x-e.r+i*e.r*0.7,y-e.r-4+bob,4,5);
+  }
+  // hp bar if hurt (skip keeper — has its own top bar)
+  if(e.hp<e.hpMax&&e.kind!=='keeper'){ctx.fillStyle='#0008';ctx.fillRect(x-e.r,y-e.r-9+bob,e.r*2,3);
+    ctx.fillStyle='#ff5a6e';ctx.fillRect(x-e.r,y-e.r-9+bob,e.r*2*(e.hp/e.hpMax),3);}
+}
+function drawShip(x,y){
+  // hull
+  ctx.fillStyle='#4a5578';ctx.beginPath();ctx.moveTo(x,y-34);ctx.lineTo(x+22,y+20);ctx.lineTo(x-22,y+20);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#5f6f9c';ctx.fillRect(x-14,y-6,28,20);
+  ctx.fillStyle='#8fe3ff';ctx.beginPath();ctx.arc(x,y-8,6,0,6.28);ctx.fill(); // cockpit
+  // damage / missing panels flicker
+  ctx.fillStyle='#2a3245';ctx.fillRect(x+6,y+2,8,10);
+  ctx.fillStyle=shipParts>=PARTS_NEEDED?'#7fe86b':'#ffb454';
+  ctx.globalAlpha=.5+.4*Math.sin(time*4);ctx.beginPath();ctx.arc(x,y+22,4,0,6.28);ctx.fill();ctx.globalAlpha=1;
+  // parts progress ring
+  ctx.strokeStyle='#2b3854';ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,40,0,6.28);ctx.stroke();
+  ctx.strokeStyle='#7fe86b';ctx.beginPath();ctx.arc(x,y,40,-1.57,-1.57+6.28*(shipParts/PARTS_NEEDED));ctx.stroke();
+}
+
+/* ================= HUD / dialog ================= */
+function updateHUD(){
+  document.getElementById('hpFill').style.width=(player.hp/player.hpMax*100)+'%';
+  document.getElementById('enFill').style.width=(player.en/player.enMax*100)+'%';
+  document.getElementById('hpTxt').textContent=Math.ceil(player.hp);
+  document.getElementById('enTxt').textContent=Math.ceil(player.en);
+  document.getElementById('scrapTxt').textContent='◈ scrap '+scrap;
+  document.getElementById('partsTxt').textContent='⬡ ship parts '+shipParts+' / '+PARTS_NEEDED;
+  document.getElementById('objTxt').textContent='▸ '+objective;
+}
+function renderWeapons(){
+  const box=document.getElementById('weapons');box.innerHTML='';
+  ['axe','blaster','pulse','fists'].forEach(id=>{
+    const w=WEAPONS[id];const have=owned[id];
+    if(id==='fists'&&(owned.axe||owned.blaster))return; // hide fists once you have a weapon
+    const el=document.createElement('div');
+    el.className='wslot'+(curWeapon===id?' on':'')+(have?'':' locked');
+    el.onclick=()=>have&&selectWeapon(id);
+    el.innerHTML=`<div class="icon">${w.icon}</div><div class="nm">${w.name}</div>`+
+      (w.key!=='—'?`<div class="key">${w.key}</div>`:'')+
+      (w.type==='ranged'&&have?`<div class="ammo">${w.ammo}</div>`:'');
+    box.appendChild(el);
+  });
+}
+let logT=null;
+function log(msg,cls){
+  const box=document.getElementById('log');
+  const el=document.createElement('div');el.className='logline'+(cls?' '+cls:'');el.textContent=msg;
+  box.appendChild(el);requestAnimationFrame(()=>el.classList.add('show'));
+  setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),300);},2600);
+}
+function say(who,txt){dialogQueue.push({who,txt});if(!inDialog)showNextDialog();}
+function showNextDialog(){
+  if(dialogQueue.length===0){inDialog=false;document.getElementById('dialog').classList.add('hidden');return;}
+  inDialog=true;const d=dialogQueue.shift();
+  document.getElementById('dialog').classList.remove('hidden');
+  document.getElementById('dlgWho').textContent=d.who;
+  const t=document.getElementById('dlgTxt');t.textContent='';
+  // typewriter
+  let i=0;clearInterval(t._iv);
+  t._iv=setInterval(()=>{t.textContent=d.txt.slice(0,++i);if(i>=d.txt.length)clearInterval(t._iv);},18);
+  t._full=d.txt;
+}
+function advanceDialog(){
+  const t=document.getElementById('dlgTxt');
+  if(t._iv&&t.textContent.length<t._full.length){clearInterval(t._iv);t.textContent=t._full;return;}
+  showNextDialog();
+}
+
+/* ================= game states ================= */
+function startGame(){
+  document.getElementById('titleScreen').classList.add('hidden');
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('weapons').style.display='flex';
+  player=makePlayer();
+  scrap=15;shipParts=0;phase='parts';coreTaken=false;boss=null;
+  upg={dmg:0,hull:0,spd:0,cells:0};paused=false;
+  document.getElementById('bench').classList.add('hidden');
+  objective='find ship parts — 0/'+PARTS_NEEDED;
+  // you salvage your kit from the wreck before setting out
+  owned={fists:true,axe:true,blaster:true,pulse:false};curWeapon='axe';
+  WEAPONS.blaster.ammo=15;WEAPONS.pulse.ammo=0;
+  enemies=[];pickups=[];bullets=[];particles=[];
+  genWorld();
+  cam.x=player.x-W/2;cam.y=player.y-H/2;
+  updateHUD();renderWeapons();
+  running=true;
+  say('SUIT AI','Systems rebooting... you survived the crash. The ship didn\'t. Six hull parts were thrown across the valley.');
+  say('SUIT AI','I salvaged your axe and plasma blaster from the wreck — 15 cells loaded. There\'s a supply drop scattered around the crash site.');
+  say('SUIT AI','Follow the markers to each debris field. And remember: the ship workbench trades scrap for upgrades. Come back often.');
+  log('WASD move · mouse aim · click attack · E interact','ok');
+}
+function continueGame(){startGame();/* hook for real save-continue later */}
+function loseGame(){
+  sfx('lose');
+  running=false;
+  document.getElementById('endScreen').classList.remove('hidden');
+  document.getElementById('endEyebrow').textContent='signal lost';
+  document.getElementById('endTitle').innerHTML='YOU DIED ON <span style="color:var(--danger)">KEPLER-7B</span>';
+  document.getElementById('endStory').innerHTML=
+    `The swarm took you before the ship could fly.<br><br>Parts recovered: <b>${shipParts}/${PARTS_NEEDED}</b> · scrap: <b>${scrap}</b><br><br>Another survey vessel will pass this way in a hundred years. They'll find your beacon, and they won't listen either.`;
+}
+function winGame(){
+  sfx('win');
+  running=false;
+  document.getElementById('endScreen').classList.remove('hidden');
+  document.getElementById('endEyebrow').textContent='engines online';
+  document.getElementById('endTitle').innerHTML='YOU <span style="color:var(--ok)">ESCAPED</span>';
+  document.getElementById('endStory').innerHTML=
+    `Six parts, one stolen alien core. The engines catch — and Kepler-7b falls away beneath you.<br><br>The keeper is dead, the vault is silent, and the swarm gathers at the sound of your engines too late.<br><br>You recovered all <b>${PARTS_NEEDED}</b> parts, the core, and <b>${scrap}</b> scrap. Whatever that core is, it's leaving with you — and it's still warm.<br><br><span style="color:var(--muted)">The signal is yours again.</span>`;
+  burst(player.x,player.y,'#7fe86b',40);
+}
+
+/* ================= loop ================= */
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(running&&!paused){update(dt);}
+  if(running)render();
+  requestAnimationFrame(loop);
+}
+
+/* ================= boot ================= */
+function boot(){
+  resize();
+  player=makePlayer();
+  // intro story text on title
+  document.getElementById('introStory').innerHTML=
+    `Your survey ship <b>Aurora-9</b> came apart in the upper atmosphere. You woke in the wreck, suit intact, on a valley floor that glitters wrong.<br><br>The hull broke into <b>four pieces</b> scattered across the map. Find them, fight what guards them, and fly out — before the things drawn to your engines find you first.`;
+  requestAnimationFrame(loop);
+}
+boot();
+</script>
+</body>
+</html>
