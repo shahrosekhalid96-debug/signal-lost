@@ -135,6 +135,57 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 @media (prefers-reduced-motion:reduce){
   .gtitle .lost,.story::after,.btn:not(.ghost),.gsub::after{animation:none;}
 }
+
+/* ===== cinematic intro ===== */
+#intro{position:fixed;inset:0;z-index:200;background:#000;opacity:1;transition:opacity .8s ease;}
+#intro.hidden{display:none;}
+#intro.fadeout{opacity:0;pointer-events:none;}
+#introCv{position:absolute;inset:0;width:100%;height:100%;}
+.cinebar{position:absolute;left:0;right:0;height:0;background:#000;z-index:5;transition:height 1.2s cubic-bezier(.7,0,.3,1);}
+.cinebar.top{top:0;} .cinebar.bot{bottom:0;}
+#intro.rolling .cinebar{height:11vh;}
+#introText{position:absolute;left:50%;bottom:16vh;transform:translateX(-50%);z-index:6;
+  font-family:'Share Tech Mono',monospace;font-size:clamp(13px,2.4vw,19px);letter-spacing:3px;
+  color:var(--hud);text-transform:uppercase;text-align:center;text-shadow:0 0 14px #0af6;
+  opacity:0;transition:opacity .45s;white-space:pre-line;line-height:2;}
+#introText.show{opacity:1;}
+#introText.alert{color:var(--danger);text-shadow:0 0 16px #ff5a6e99;animation:alertPulse .5s steps(2,end) infinite;}
+@keyframes alertPulse{0%{opacity:1;}50%{opacity:.45;}100%{opacity:1;}}
+#introFlash{position:absolute;inset:0;background:#fff;opacity:0;z-index:7;pointer-events:none;}
+#introTitle{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:.35em;
+  z-index:8;font-family:'Chakra Petch',sans-serif;font-weight:700;
+  font-size:clamp(52px,12vw,120px);letter-spacing:-2px;pointer-events:none;}
+#introTitle span{opacity:0;display:inline-block;}
+#introTitle .w1{color:#dfe9f5;text-shadow:0 0 40px #8fe3ff88;}
+#introTitle .w2{color:var(--danger);text-shadow:0 0 40px #ff5a6e99;}
+#introTitle .w1.slam{animation:wordSlam .32s cubic-bezier(.2,1.6,.4,1) forwards;}
+#introTitle .w2.slam{animation:wordSlam .32s cubic-bezier(.2,1.6,.4,1) forwards, lostGlitch 1.4s .35s infinite steps(1,end);}
+@keyframes wordSlam{
+  0%{opacity:0;transform:scale(3.2);filter:blur(8px);}
+  60%{opacity:1;transform:scale(.94);filter:blur(0);}
+  100%{opacity:1;transform:scale(1);}
+}
+@keyframes lostGlitch{
+  0%,82%{transform:none;opacity:1;}
+  84%{transform:translate(4px,-2px) skewX(8deg);opacity:.7;text-shadow:-4px 0 #22d3ee,4px 0 #ff5a6e;}
+  87%{transform:translate(-4px,2px);opacity:.9;}
+  90%{opacity:.4;}
+  92%,100%{transform:none;opacity:1;text-shadow:0 0 40px #ff5a6e99;}
+}
+#intro.shake #introCv,#intro.shake #introTitle{animation:camShake .09s linear infinite;}
+@keyframes camShake{
+  0%{transform:translate(0,0);}25%{transform:translate(3px,-3px);}
+  50%{transform:translate(-3px,2px);}75%{transform:translate(2px,3px);}100%{transform:translate(-2px,-2px);}
+}
+#skipBtn{position:absolute;right:22px;bottom:calc(11vh + 16px);z-index:9;
+  font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:2px;color:var(--muted);
+  background:#ffffff0a;border:1px solid #ffffff22;border-radius:99px;padding:8px 16px;cursor:pointer;
+  opacity:0;transition:opacity .4s, color .2s;}
+#intro.rolling #skipBtn{opacity:1;}
+#skipBtn:hover{color:var(--ink);}
+.replay-link{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--muted);
+  cursor:pointer;margin-top:14px;display:inline-block;}
+.replay-link:hover{color:var(--hud);}
 .eyebrow{font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:4px;color:var(--hud);
   text-transform:uppercase;margin-bottom:14px;opacity:.85;}
 .gtitle{font-weight:700;font-size:clamp(38px,9vw,62px);line-height:.95;letter-spacing:-1px;margin-bottom:8px;
@@ -213,6 +264,17 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
   <div class="mpad" id="mpad"><div class="ring"></div><div class="stick" id="stick"></div></div>
   <button class="fire-btn" id="fireBtn">FIRE</button>
 
+  <!-- cinematic intro -->
+  <div id="intro" class="hidden">
+    <canvas id="introCv"></canvas>
+    <div class="cinebar top"></div>
+    <div class="cinebar bot"></div>
+    <div id="introText"></div>
+    <div id="introFlash"></div>
+    <div id="introTitle"><span class="w1">SIGNAL</span><span class="w2">LOST</span></div>
+    <button id="skipBtn" onclick="finishIntro()">skip ▸▸</button>
+  </div>
+
   <!-- title screen -->
   <div class="screen" id="titleScreen">
     <canvas id="titleFx"></canvas>
@@ -226,9 +288,10 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
         <button class="btn ghost" id="continueBtn" onclick="continueGame()" style="display:none">continue</button>
       </div>
       <div class="controls-hint desk">
-        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; · &nbsp; <kbd>mouse</kbd> aim &nbsp; · &nbsp;
-        <kbd>click</kbd> attack &nbsp; · &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> weapons &nbsp; · &nbsp; <kbd>E</kbd> interact
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; · &nbsp; <kbd>mouse</kbd> aim <span style="opacity:.7">(or aim by moving)</span> &nbsp; · &nbsp;
+        <kbd>click</kbd> / <kbd>space</kbd> attack &nbsp; · &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> weapons &nbsp; · &nbsp; <kbd>E</kbd> interact
       </div>
+      <span class="replay-link" onclick="startIntro(true)">▶ replay intro</span>
     </div>
   </div>
 
@@ -424,7 +487,8 @@ addEventListener('keydown',e=>{
   if(k===' ')e.preventDefault();
 });
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
-cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();mouse.x=e.clientX-r.left;mouse.y=e.clientY-r.top;});
+let lastMouseT=0;
+cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();mouse.x=e.clientX-r.left;mouse.y=e.clientY-r.top;lastMouseT=Date.now();});
 cv.addEventListener('mousedown',e=>{if(inDialog){advanceDialog();return;}mouse.down=true;});
 addEventListener('mouseup',()=>mouse.down=false);
 // mobile joystick
@@ -800,9 +864,10 @@ function update(dt){
     player.x=clamp(player.x,TILE,(MAP_W-1)*TILE);player.y=clamp(player.y,TILE,(MAP_H-1)*TILE);
     player.walkT+=dt*10;
   }
-  // aim (desktop = mouse; mobile = movement dir)
-  if(!('ontouchstart'in window)||mouse.x){player.face=Math.atan2((mouse.y-H/2),(mouse.x-W/2));}
+  // aim priority: touch joystick > recently-used mouse > movement direction (keyboard-only)
   if(joy.active&&ml>0)player.face=Math.atan2(my,mx);
+  else if(Date.now()-lastMouseT<2500){player.face=Math.atan2((mouse.y-H/2),(mouse.x-W/2));}
+  else if(ml>0)player.face=Math.atan2(my,mx);
   // energy regen (faster with cell upgrades)
   player.en=Math.min(player.enMax,player.en+dt*(8+upg.cells*4));
   if(player.atkCd>0)player.atkCd-=dt;
@@ -811,8 +876,8 @@ function update(dt){
   if(buffs.dmg>0)buffs.dmg-=dt;
   if(buffs.spd>0)buffs.spd-=dt;
   if(buffs.shield>0)buffs.shield-=dt;
-  // attack
-  if(mouse.down)attack();
+  // attack — mouse click OR Space/J for keyboard-only play
+  if(mouse.down||keys[' ']||keys['j'])attack();
 
   // bullets
   bullets.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
@@ -1266,6 +1331,7 @@ function advanceDialog(){
   const t=document.getElementById('dlgTxt');
   if(t._iv&&t.textContent.length<t._full.length){clearInterval(t._iv);t.textContent=t._full;return;}
   showNextDialog();
+  if(!inDialog){keys[' ']=false;keys['enter']=false;}  // don't carry the press into an attack
 }
 
 /* ================= game states ================= */
@@ -1290,7 +1356,7 @@ function startGame(){
   say('SUIT AI','Systems rebooting... you survived the crash. The ship didn\'t. Six hull parts were thrown across the valley.');
   say('SUIT AI','I salvaged your axe and plasma blaster from the wreck — 15 cells loaded. There\'s a supply drop scattered around the crash site.');
   say('SUIT AI','Keep an eye out for alien artifacts too — sell them at the ship marketplace. And I\'ll launch you a supply pod now and then, when I can spare one.');
-  log('WASD move · mouse aim · click attack · E interact','ok');
+  log('WASD move · click or SPACE attack · aim with mouse or by moving · E interact','ok');
 }
 function continueGame(){startGame();/* hook for real save-continue later */}
 function loseGame(){
@@ -1322,7 +1388,6 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-/* ================= boot ================= */
 /* ================= title screen FX =================
    The story, animated: Aurora-9's hull pieces burn down the sky,
    embers rise from the crash site, stars watch. Runs only while
@@ -1419,6 +1484,175 @@ function titleFxFrame(now){
 }
 window.addEventListener('resize',sizeTitleFx);
 
+/* ================= cinematic intro =================
+   Five-scene opening cut, all procedural:
+   0 cruise  — Aurora-9 gliding through streaming stars
+   1 alert   — Kepler-7b looms, red alarms, camera shake
+   2 breakup — white flash, hull tears into six burning sections
+   3 fall    — ride a section down; ground rushes up; white-out
+   4 slam    — SIGNAL … LOST title card with glitch
+   Skippable, remembered per session. */
+const IN={on:false,t:0,scene:-1,cv:null,ctx:null,W:0,H:0,
+  stars:[],pieces:[],trail:[],flashA:0,shipX:0,last:0};
+const IN_SCENES=[3.0,2.4,2.6,2.0,2.2];   // seconds per scene
+function startIntro(force){
+  try{if(!force&&sessionStorage.getItem('sl_intro'))return;}catch(e){}
+  if(!force&&window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  IN.cv=document.getElementById('introCv');
+  if(!IN.cv||!IN.cv.getContext)return;
+  IN.ctx=IN.cv.getContext('2d');
+  IN.W=IN.cv.width=window.innerWidth;IN.H=IN.cv.height=window.innerHeight;
+  IN.on=true;IN.t=0;IN.scene=-1;IN.flashA=0;IN.pieces=[];IN.trail=[];
+  IN.stars=[];for(let i=0;i<170;i++)IN.stars.push({x:Math.random()*IN.W,y:Math.random()*IN.H,z:rnd(0.3,1)});
+  const el=document.getElementById('intro');
+  el.classList.remove('hidden','fadeout','shake');
+  document.getElementById('introTitle').querySelectorAll('span').forEach(s=>s.classList.remove('slam'));
+  setTimeout(()=>el.classList.add('rolling'),60);
+  setIntroText('');
+  IN.last=0;requestAnimationFrame(introFrame);
+}
+function finishIntro(){
+  if(!IN.on)return;IN.on=false;
+  try{sessionStorage.setItem('sl_intro','1');}catch(e){}
+  const el=document.getElementById('intro');
+  el.classList.remove('shake');el.classList.add('fadeout');
+  setTimeout(()=>{el.classList.add('hidden');el.classList.remove('rolling','fadeout');},850);
+}
+function setIntroText(txt,alert){
+  const t=document.getElementById('introText');
+  t.classList.toggle('alert',!!alert);
+  if(!txt){t.classList.remove('show');return;}
+  t.textContent=txt;t.classList.add('show');
+}
+function introShip(c,x,y,s,heat){
+  c.save();c.translate(x,y);c.scale(s,s);
+  const fl=1+0.3*Math.sin(Date.now()/40);
+  c.fillStyle='#8fe3ff';c.globalAlpha=.85;
+  c.beginPath();c.moveTo(-46,0);c.lineTo(-46-16*fl,-5);c.lineTo(-46-22*fl,0);c.lineTo(-46-16*fl,5);c.closePath();c.fill();
+  c.globalAlpha=1;
+  c.fillStyle='#4a5578';
+  c.beginPath();c.moveTo(50,0);c.lineTo(22,-13);c.lineTo(-38,-11);c.lineTo(-46,0);c.lineTo(-38,11);c.lineTo(22,13);c.closePath();c.fill();
+  c.fillStyle='#5f6f9c';c.fillRect(-30,-4,62,8);
+  c.beginPath();c.moveTo(-20,-11);c.lineTo(-34,-24);c.lineTo(-38,-11);c.closePath();c.fill();
+  c.beginPath();c.moveTo(-20,11);c.lineTo(-34,24);c.lineTo(-38,11);c.closePath();c.fill();
+  c.fillStyle='#8fe3ff';c.beginPath();c.arc(26,0,6,0,6.28);c.fill();
+  if(heat>0){c.fillStyle='#ff7a45';c.globalAlpha=heat*.6;
+    c.beginPath();c.moveTo(52,0);c.lineTo(20,-15);c.lineTo(20,15);c.closePath();c.fill();c.globalAlpha=1;}
+  c.restore();
+}
+function introPlanet(c,rise){
+  const R=IN.H*1.5, cy=IN.H+R-rise*R*0.55;
+  const g=c.createRadialGradient(IN.W/2,cy,R*0.92,IN.W/2,cy,R*1.04);
+  g.addColorStop(0,'#123a2a');g.addColorStop(.7,'#1a5a3a');g.addColorStop(1,'rgba(127,214,155,0)');
+  c.fillStyle=g;c.beginPath();c.arc(IN.W/2,cy,R*1.04,0,6.28);c.fill();
+  c.fillStyle='#0f2f22';c.beginPath();c.arc(IN.W/2,cy,R*0.92,0,6.28);c.fill();
+}
+function introFrame(now){
+  if(!IN.on)return;
+  const dt=Math.min(0.05,(now-IN.last)/1000||0.016);IN.last=now;IN.t+=dt;
+  const c=IN.ctx,W=IN.W,H=IN.H;
+  // which scene are we in
+  let acc=0,sc=IN_SCENES.length;
+  for(let i=0;i<IN_SCENES.length;i++){if(IN.t<acc+IN_SCENES[i]){sc=i;break;}acc+=IN_SCENES[i];}
+  if(sc>=IN_SCENES.length){finishIntro();return;}
+  const st=IN.t-acc;                       // time within scene
+  if(sc!==IN.scene)introSceneEnter(sc);
+  IN.scene=sc;
+  c.clearRect(0,0,W,H);
+  c.fillStyle='#02040a';c.fillRect(0,0,W,H);
+
+  const speed = sc===0?60 : sc===1?160 : 40;
+  IN.stars.forEach(s=>{
+    s.x-=speed*s.z*dt*3;
+    if(s.x<-20){s.x=W+20;s.y=Math.random()*H;}
+    const len=Math.min(26,speed*s.z*0.12);
+    c.strokeStyle='rgba(207,216,255,'+(0.25+s.z*0.5)+')';c.lineWidth=s.z*1.4;
+    c.beginPath();c.moveTo(s.x,s.y);c.lineTo(s.x+len,s.y);c.stroke();
+  });
+
+  if(sc===0){ // cruise
+    IN.shipX=W*0.28+W*0.18*(st/IN_SCENES[0]);
+    introShip(c,IN.shipX,H*0.44,Math.min(2,W/520),0);
+  }
+  else if(sc===1){ // alert
+    introPlanet(c,st/IN_SCENES[1]);
+    const heat=st/IN_SCENES[1];
+    introShip(c,W*0.46+10*Math.sin(st*30),H*0.42+14*heat*Math.sin(st*25),Math.min(2,W/520),heat*0.8);
+    c.fillStyle='rgba(255,90,110,'+(0.08+0.07*Math.sin(st*12))+')';c.fillRect(0,0,W,H);
+  }
+  else if(sc===2){ // breakup
+    introPlanet(c,1);
+    if(st<0.25)IN.flashA=1-st*4;
+    if(IN.pieces.length===0){
+      for(let i=0;i<6;i++){const a=rnd(0,6.28);
+        IN.pieces.push({x:W*0.47,y:H*0.42,vx:Math.cos(a)*rnd(40,110)+30,vy:Math.sin(a)*rnd(30,80)+50,
+          rot:rnd(0,6.28),vr:rnd(-4,4),s:rnd(10,20)});}
+    }
+    const slow=st<0.9?0.25:1;   // slow-mo, then real time
+    IN.pieces.forEach(p=>{
+      p.x+=p.vx*dt*slow;p.y+=p.vy*dt*slow;p.rot+=p.vr*dt*slow;
+      if(Math.random()<0.7)IN.trail.push({x:p.x,y:p.y,vx:rnd(-20,20),vy:rnd(-20,20),life:rnd(.3,.7),max:.7});
+      c.save();c.translate(p.x,p.y);c.rotate(p.rot);
+      c.fillStyle='#4a5578';c.fillRect(-p.s/2,-p.s/2,p.s,p.s*0.7);
+      c.fillStyle='#ffb454';c.globalAlpha=.8;c.fillRect(-p.s/2,-p.s/2,p.s*0.4,p.s*0.7);c.globalAlpha=1;
+      c.restore();
+    });
+  }
+  else if(sc===3){ // the fall
+    const p=st/IN_SCENES[3];
+    for(let i=0;i<40;i++){const x=(i*97)%W, y=((i*211)+st*900)%H;
+      c.strokeStyle='rgba(207,216,255,.3)';c.lineWidth=1.2;
+      c.beginPath();c.moveTo(x,y);c.lineTo(x,y+30+p*40);c.stroke();}
+    const gy=H-(H*0.9)*p;
+    c.fillStyle='#0a0f1e';
+    c.beginPath();c.moveTo(0,H);c.lineTo(0,gy+H*0.2);
+    for(let x=0;x<=W;x+=50)c.lineTo(x,gy+H*0.2-16*Math.abs(Math.sin(x*0.015)));
+    c.lineTo(W,H);c.closePath();c.fill();
+    const px=W/2, py=H*0.3+p*H*0.25;
+    if(Math.random()<0.9)IN.trail.push({x:px+rnd(-4,4),y:py-10,vx:rnd(-20,20),vy:rnd(-80,-30),life:rnd(.3,.6),max:.6});
+    c.save();c.translate(px,py);c.rotate(st*6);
+    c.fillStyle='#4a5578';c.fillRect(-9,-9,18,13);
+    c.fillStyle='#ffb454';c.fillRect(-9,-9,7,13);c.restore();
+    if(p>0.92)IN.flashA=Math.min(1,(p-0.92)*14);
+  }
+  else if(sc===4){ // title slam — DOM words do the work
+    IN.flashA=Math.max(0,IN.flashA-dt*2.5);
+  }
+
+  for(let i=IN.trail.length-1;i>=0;i--){const e=IN.trail[i];
+    e.x+=e.vx*dt;e.y+=e.vy*dt;e.life-=dt;
+    if(e.life<=0){IN.trail.splice(i,1);continue;}
+    c.globalAlpha=(e.life/e.max)*0.9;c.fillStyle=pick(['#ffb454','#ff7a45','#ffe36e']);
+    c.beginPath();c.arc(e.x,e.y,1.8,0,6.28);c.fill();}
+  c.globalAlpha=1;
+
+  document.getElementById('introFlash').style.opacity=IN.flashA;
+  if(IN.flashA>0&&sc!==3)IN.flashA=Math.max(0,IN.flashA-dt*2);
+
+  requestAnimationFrame(introFrame);
+}
+function introSceneEnter(sc){
+  const el=document.getElementById('intro');
+  el.classList.toggle('shake',sc===1||sc===2);
+  if(sc===0){setIntroText('deep-survey vessel · aurora-9\nday 847 — uncharted space');tone(220,0.3,'sine',0.04);}
+  else if(sc===1){setIntroText('⚠ proximity alert — gravity well\nkepler-7b · pull exceeds thrust',true);
+    for(let i=0;i<4;i++)setTimeout(()=>tone(880,0.12,'square',0.06),i*420);}
+  else if(sc===2){setIntroText('hull separation\nsix sections lost',true);tone(60,0.8,'sawtooth',0.12,-20);}
+  else if(sc===3){setIntroText('');tone(110,1.2,'sawtooth',0.08,-60);}
+  else if(sc===4){
+    setIntroText('');
+    const t=document.getElementById('introTitle');
+    const w1=t.querySelector('.w1'),w2=t.querySelector('.w2');
+    setTimeout(()=>{w1.classList.add('slam');tone(70,0.4,'sawtooth',0.14,-30);},150);
+    setTimeout(()=>{w2.classList.add('slam');tone(50,0.6,'sawtooth',0.16,-20);shakeIntroOnce();},750);
+  }
+}
+function shakeIntroOnce(){
+  const el=document.getElementById('intro');
+  el.classList.add('shake');setTimeout(()=>el.classList.remove('shake'),350);
+}
+window.addEventListener('resize',()=>{if(IN.on&&IN.cv){IN.W=IN.cv.width=window.innerWidth;IN.H=IN.cv.height=window.innerHeight;}});
+
 /* ================= boot ================= */
 function boot(){
   resize();
@@ -1427,6 +1661,7 @@ function boot(){
   document.getElementById('introStory').innerHTML=
     `Your survey ship <b>Aurora-9</b> came apart in the upper atmosphere. You woke in the wreck, suit intact, on a valley floor that glitters wrong.<br><br>The hull broke into <b>six pieces</b> scattered across the map. Find them, fight what guards them, and fly out — before the things drawn to your engines find you first.`;
   startTitleFx();
+  startIntro();
   requestAnimationFrame(loop);
 }
 boot();
