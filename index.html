@@ -99,6 +99,12 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 
 /* ===== overlays (menus) ===== */
 #choiceScreen{z-index:210;}
+#tutHint{position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:25;
+  font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:1px;color:#ffe36e;
+  background:#0a0f1cd9;border:1px solid #ffe36e55;border-radius:99px;padding:9px 18px;
+  text-shadow:0 0 8px #000;pointer-events:none;animation:tutPulse 1.6s ease-in-out infinite;}
+#tutHint.hidden{display:none;}
+@keyframes tutPulse{0%,100%{box-shadow:0 0 12px #ffe36e22;}50%{box-shadow:0 0 22px #ffe36e55;}}
 #fadeLayer{position:fixed;inset:0;background:#02040a;opacity:0;pointer-events:none;z-index:205;
   transition:opacity .5s ease;}
 #fadeLayer.on{opacity:1;pointer-events:auto;}
@@ -223,16 +229,16 @@ button:focus-visible,.wslot:focus-visible{outline:2px solid var(--hud);outline-o
   bottom:24px;}
 .tpad.left{left:20px;} .tpad.right{right:20px;}
 .tpad .ring{position:absolute;inset:0;border-radius:50%;background:#ffffff08;border:1px solid var(--edge);}
-.tpad .lbl{position:absolute;top:-20px;left:0;right:0;text-align:center;font-family:'Share Tech Mono',monospace;
-  font-size:10px;letter-spacing:1px;color:var(--muted);}
+.tpad .lbl{position:absolute;top:-24px;left:-20px;right:-20px;text-align:center;font-family:'Share Tech Mono',monospace;
+  font-size:12px;letter-spacing:1px;color:var(--ink);text-shadow:0 1px 6px #000;}
 .tpad .stick{position:absolute;width:60px;height:60px;border-radius:50%;left:45px;top:45px;
   box-shadow:0 0 20px #0af4;}
-.tpad.left .stick{background:#8fe3ff33;border:2px solid var(--hud);}
-.tpad.right .stick{background:#ff5a6e33;border:2px solid var(--danger);box-shadow:0 0 20px #ff5a6e55;}
-.tpad.right .ring{border-color:#ff5a6e55;}
+.tpad.left .stick{background:#ff5a6e33;border:2px solid var(--danger);box-shadow:0 0 20px #ff5a6e55;}
+.tpad.right .stick{background:#8fe3ff33;border:2px solid var(--hud);}
+.tpad.left .ring{border-color:#ff5a6e55;}
 /* touch action buttons stacked above the right stick */
-.tbtns{position:absolute;right:22px;bottom:186px;z-index:12;display:none;flex-direction:column;gap:10px;pointer-events:auto;}
-.tbtns button{width:58px;height:58px;border-radius:16px;background:var(--panel);border:1.5px solid var(--edge);
+.tbtns{position:absolute;left:22px;bottom:186px;z-index:12;display:none;flex-direction:column;gap:10px;pointer-events:auto;}
+.tbtns button{width:64px;height:58px;border-radius:16px;background:var(--panel);border:1.5px solid var(--edge);
   color:var(--ink);font-family:'Chakra Petch',sans-serif;font-weight:700;font-size:12px;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;backdrop-filter:blur(6px);
   pointer-events:auto;}
@@ -290,11 +296,12 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
   </div>
 
   <!-- touch controls: left = move, right = aim/fire, buttons = interact & weapon -->
-  <div class="tpad left" id="moveStick"><div class="ring"></div><div class="lbl">MOVE</div><div class="stick" id="moveKnob"></div></div>
-  <div class="tpad right" id="aimStick"><div class="ring"></div><div class="lbl">AIM · FIRE</div><div class="stick" id="aimKnob"></div></div>
+  <div class="tpad right" id="moveStick"><div class="ring"></div><div class="lbl">MOVE</div><div class="stick" id="moveKnob"></div></div>
+  <div class="tpad left" id="aimStick"><div class="ring"></div><div class="lbl">SHOOT (push to fire)</div><div class="stick" id="aimKnob"></div></div>
   <div class="tbtns" id="tbtns">
-    <button id="tInteract"><span class="ic">✋</span>USE</button>
-    <button id="tSwap"><span class="ic">🔁</span>WPN</button>
+    <button id="tInteract"><span class="ic">✋</span>USE / E</button>
+    <button id="tSwap"><span class="ic">🔁</span>WEAPON</button>
+    <button id="tMarket"><span class="ic">◈</span>MARKET</button>
   </div>
 
   <!-- cinematic intro -->
@@ -310,6 +317,9 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
 
   <!-- zone fade transition layer -->
   <div id="fadeLayer"></div>
+
+  <!-- tutorial hint -->
+  <div id="tutHint" class="hidden"></div>
 
   <!-- zone entry banner -->
   <div id="zoneBanner" class="hidden"><div class="zn"></div><div class="zt"></div></div>
@@ -341,7 +351,7 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
       </div>
       <div class="controls-hint desk">
         <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; · &nbsp; <kbd>mouse</kbd> aim <span style="opacity:.7">(or aim by moving)</span> &nbsp; · &nbsp;
-        <kbd>click</kbd> / <kbd>space</kbd> attack &nbsp; · &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> weapons &nbsp; · &nbsp; <kbd>E</kbd> interact
+        <kbd>click</kbd> / <kbd>space</kbd> attack &nbsp; · &nbsp; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> weapons &nbsp; · &nbsp; <kbd>E</kbd> interact &nbsp; · &nbsp; <kbd>M</kbd> market
       </div>
       <span class="replay-link" onclick="startIntro(true)">▶ replay intro</span>
     </div>
@@ -625,6 +635,8 @@ makeStick('aimStick','aimKnob',
 const tI=document.getElementById('tInteract'), tS=document.getElementById('tSwap');
 if(tI)tI.addEventListener('pointerdown',e=>{e.preventDefault();if(inDialog){advanceDialog();}else if(paused){/* market handles its own */}else tryInteract();});
 if(tS)tS.addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon();});
+const tM=document.getElementById('tMarket');
+if(tM)tM.addEventListener('pointerdown',e=>{e.preventDefault();if(paused){closeBench();}else if(!inDialog&&!choicePending)openBench();});
 function cycleWeapon(){
   const order=['axe','blaster','pulse'].filter(id=>owned[id]);
   if(order.length<2)return;
@@ -647,6 +659,7 @@ function tryInteract(){
 
   if(s.type==='wreck'&&s.hasPart&&!s.looted){
     s.looted=true; shipParts++; updateHUD(); sfx('part');
+    if(tut.step<2){setTut(2);log('you\'ve got the hang of it — the arrows mark the rest','ok');}
     burst(s.x,s.y,'#8fe3ff',20);
     log('recovered a hull part ('+shipParts+'/'+PARTS_NEEDED+')','ok');
     checkZoneTask();
@@ -748,6 +761,17 @@ const ENTRY_CHOICES={
     b:{label:'Steady yourself (restore hull)', apply:()=>{player.hp=player.hpMax;updateHUD();log('you steady your breathing — hull restored','ok');}} },
 };
 let transitioning=false;
+/* first-steps tutorial (zone 1 only): guide to first wreck, then E, then done */
+let tut={step:2};
+function tutTarget(){return structures.find(st=>st.type==='wreck'&&st.hasPart&&!st.looted);}
+function setTut(step){
+  tut.step=step;
+  const el=document.getElementById('tutHint');
+  const touch=document.body.classList.contains('touch-on');
+  if(step===0){el.textContent='① follow the yellow arrow — salvage your first hull part';el.classList.remove('hidden');}
+  else if(step===1){el.textContent=touch?'② tap USE to salvage the part':'② press E to salvage the part';el.classList.remove('hidden');}
+  else el.classList.add('hidden');
+}
 function startZoneTransition(zi){
   if(transitioning)return;
   transitioning=true;paused=true;
@@ -1177,6 +1201,12 @@ function update(dt){
   // pickups (float + collect)
   pickups.forEach(p=>{if(dist(p,player)<player.r+12)collect(p);});
 
+  // tutorial step progression
+  if(tut.step<2&&zone===0){const tw=tutTarget();
+    if(tw){const td=dist(tw,player);
+      if(tut.step===0&&td<110)setTut(1);
+      else if(tut.step===1&&td>=140)setTut(0);}
+  }
   // walking into the exit gate transitions automatically — no key needed
   if(zoneTaskDone&&exitGate&&!transitioning&&!choicePending&&!inDialog&&dist(exitGate,player)<exitGate.r){
     startZoneTransition(zone+1);
@@ -1448,6 +1478,16 @@ function render(){
   vg.addColorStop(0,'transparent');vg.addColorStop(1,'#04060bcc');
   ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
 
+  // tutorial arrow over the first wreck
+  if(tut.step<2&&zone===0){const tw=tutTarget();
+    if(tw){const tx=tw.x-ox,ty=tw.y-oy;
+      if(tx>-40&&ty>-40&&tx<W+40&&ty<H+40){
+        const bob=Math.sin(time*4)*6;
+        ctx.fillStyle='#ffe36e';
+        ctx.beginPath();ctx.moveTo(tx,ty-46+bob);ctx.lineTo(tx-12,ty-64+bob);ctx.lineTo(tx+12,ty-64+bob);ctx.closePath();ctx.fill();
+        ctx.strokeStyle='#ffe36e';ctx.lineWidth=2;ctx.globalAlpha=.5+.4*Math.sin(time*4);
+        ctx.beginPath();ctx.arc(tx,ty,34+4*Math.sin(time*3),0,6.28);ctx.stroke();ctx.globalAlpha=1;
+      }}}
   drawWaypoints(ox,oy);
   drawMinimap();
 
@@ -1518,7 +1558,7 @@ function drawWaypoints(ox,oy){
 }
 function drawMinimap(){
   const S=Math.min(120,W*0.28), pad=14;
-  const mx=W-S-pad, my=H-S-pad;
+  const mx=W-S-pad, my=96;
   const sc=S/(MAP_W*TILE);
   ctx.save();
   ctx.globalAlpha=0.82;
@@ -1706,9 +1746,12 @@ function startGame(){
   updateHUD();renderWeapons();
   running=true;
   flashZoneTitle(ZONES[0].name, ZONES[0].task);
+  setTut(0);
   say('SUIT AI','You survived the crash — barely. The hull scattered across this valley in pieces.');
   say('SUIT AI','Salvage what you can, then push east. There\'s a long way between here and any way off this rock.');
-  log('WASD move · click/SPACE attack · aim by moving or mouse · E interact','ok');
+  say('SUIT AI','See those glowing gold gems ◆? Alien artifacts — grab every one. Open the MARKETPLACE (press M, or the MARKET button on touch) to sell them for scrap and buy upgrades, repairs and boosts.');
+  log('WASD move · click/SPACE attack · E interact · M marketplace','ok');
+  log('◆ collect glowing artifacts → sell at the marketplace','ok');
 }
 function continueGame(){startGame();/* hook for real save-continue later */}
 function loseGame(){
