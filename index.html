@@ -99,6 +99,30 @@ canvas{position:absolute;top:0;left:0;image-rendering:pixelated;display:block;}
 
 /* ===== overlays (menus) ===== */
 #choiceScreen{z-index:210;}
+#pauseScreen{z-index:208;} #combatScreen{z-index:209;}
+/* --- screen layering (retina / CRT glass) --- */
+#crt{position:fixed;inset:0;z-index:180;pointer-events:none;mix-blend-mode:overlay;opacity:.55;}
+#crt .scan{position:absolute;inset:0;
+  background:repeating-linear-gradient(180deg,rgba(255,255,255,.05) 0 1px,transparent 1px 3px);}
+#crt .grille{position:absolute;inset:0;opacity:.5;
+  background:repeating-linear-gradient(90deg,rgba(255,0,80,.05) 0 1px,rgba(0,255,190,.04) 1px 2px,rgba(60,120,255,.05) 2px 3px);}
+#crt .glare{position:absolute;inset:0;mix-blend-mode:screen;opacity:.5;
+  background:radial-gradient(120% 70% at 50% -10%,rgba(190,225,255,.16),transparent 60%),
+             radial-gradient(90% 60% at 15% 105%,rgba(120,180,255,.07),transparent 60%);}
+body.no-crt #crt{display:none;}
+/* pause button */
+#pauseBtn{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:26;
+  width:42px;height:34px;border-radius:10px;background:var(--panel);border:1px solid var(--edge);
+  color:var(--hud);font-family:'Share Tech Mono',monospace;font-size:15px;letter-spacing:2px;
+  backdrop-filter:blur(6px);cursor:pointer;pointer-events:auto;}
+#pauseBtn:hover{border-color:var(--hud);color:var(--ink);}
+#pauseBtn.hidden{display:none;}
+/* weapon picker inside combat lesson */
+.wpick{width:78px;padding:10px 6px;border-radius:12px;background:#ffffff08;border:1.5px solid var(--edge);
+  color:var(--ink);font-family:'Chakra Petch',sans-serif;font-size:11px;text-align:center;cursor:pointer;}
+.wpick .ic{font-size:22px;display:block;margin-bottom:3px;}
+.wpick.sel{border-color:var(--hud);background:#8fe3ff1a;box-shadow:0 0 16px #0af4;}
+.wpick .k{display:block;color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:10px;margin-top:2px;}
 #tutHint{position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:25;
   font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:1px;color:#ffe36e;
   background:#0a0f1cd9;border:1px solid #ffe36e55;border-radius:99px;padding:9px 18px;
@@ -320,6 +344,39 @@ body.touch-on .weapons{bottom:200px;}   /* lift weapon bar above the sticks */
 
   <!-- tutorial hint -->
   <div id="tutHint" class="hidden"></div>
+
+  <!-- screen layering: scanlines + aperture grille + glass glare -->
+  <div id="crt"><div class="scan"></div><div class="grille"></div><div class="glare"></div></div>
+
+  <!-- play / pause -->
+  <button id="pauseBtn" class="hidden" title="pause (P)">II</button>
+
+  <!-- paused overlay -->
+  <div class="screen hidden" id="pauseScreen">
+    <div class="menu-card">
+      <div class="eyebrow">paused</div>
+      <div style="font-family:'Chakra Petch';font-weight:700;font-size:clamp(26px,6vw,40px);margin-bottom:8px;">SIGNAL HELD</div>
+      <div class="story" style="text-align:left;">Take your time. The valley isn't going anywhere.</div>
+      <div class="btnrow" style="flex-direction:column;">
+        <button class="btn" onclick="resumeGame()">▸ resume</button>
+        <button class="btn ghost" onclick="openBench()">◈ marketplace</button>
+      </div>
+      <div class="controls-hint desk" style="margin-top:10px;">press <kbd>P</kbd> or <kbd>Esc</kbd> to resume</div>
+    </div>
+  </div>
+
+  <!-- first-combat teaching modal -->
+  <div class="screen hidden" id="combatScreen">
+    <div class="menu-card">
+      <div class="eyebrow">contact</div>
+      <div style="font-family:'Chakra Petch';font-weight:700;font-size:clamp(24px,5.5vw,36px);margin-bottom:8px;">SOMETHING FOUND YOU</div>
+      <div class="story" style="text-align:left;" id="combatBody"></div>
+      <div id="combatPick" style="display:flex;gap:10px;justify-content:center;margin:14px 0 4px;"></div>
+      <div class="btnrow" style="flex-direction:column;">
+        <button class="btn" onclick="closeCombatLesson()">▸ got it — fight</button>
+      </div>
+    </div>
+  </div>
 
   <!-- zone entry banner -->
   <div id="zoneBanner" class="hidden"><div class="zn"></div><div class="zt"></div></div>
@@ -592,6 +649,8 @@ function spawnBoss(x,y){
 addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   keys[k]=true;
+  if(k==='p'&&running&&!inDialog&&!choicePending){togglePause();return;}
+  if(k==='escape'&&userPaused){resumeGame();return;}
   if(k==='escape'&&paused&&!choicePending){closeBench();return;}
   if(k==='m'&&running&&!paused&&!inDialog&&!choicePending){openBench();return;}
   if(inDialog&&(k===' '||k==='enter'||k==='e')){advanceDialog();e.preventDefault();return;}
@@ -637,6 +696,8 @@ if(tI)tI.addEventListener('pointerdown',e=>{e.preventDefault();if(inDialog){adva
 if(tS)tS.addEventListener('pointerdown',e=>{e.preventDefault();cycleWeapon();});
 const tM=document.getElementById('tMarket');
 if(tM)tM.addEventListener('pointerdown',e=>{e.preventDefault();if(paused){closeBench();}else if(!inDialog&&!choicePending)openBench();});
+const pB=document.getElementById('pauseBtn');
+if(pB)pB.addEventListener('click',e=>{e.preventDefault();togglePause();});
 function cycleWeapon(){
   const order=['axe','blaster','pulse'].filter(id=>owned[id]);
   if(order.length<2)return;
@@ -763,6 +824,55 @@ const ENTRY_CHOICES={
 let transitioning=false;
 /* first-steps tutorial (zone 1 only): guide to first wreck, then E, then done */
 let tut={step:2,combat:false};let tutKills=0;
+let userPaused=false, combatLessonDone=false;
+function togglePause(){ userPaused?resumeGame():pauseGame(); }
+function pauseGame(){
+  if(!running||inDialog||choicePending||transitioning)return;
+  userPaused=true;paused=true;
+  document.getElementById('pauseScreen').classList.remove('hidden');
+  document.getElementById('pauseBtn').textContent='▸';
+}
+function resumeGame(){
+  userPaused=false;
+  document.getElementById('pauseScreen').classList.add('hidden');
+  document.getElementById('pauseBtn').textContent='II';
+  if(!document.getElementById('bench').classList.contains('hidden'))return; // market still open
+  if(!choicePending)paused=false;
+}
+/* first-contact lesson: pause and teach weapon select + shooting */
+function openCombatLesson(){
+  if(combatLessonDone)return;
+  combatLessonDone=true;paused=true;
+  const touch=document.body.classList.contains('touch-on');
+  document.getElementById('combatBody').innerHTML= touch
+    ? 'Pick a weapon below, then push the <b>SHOOT</b> stick (left) toward the enemy to fire. The <b>WEAPON</b> button cycles weapons any time.'
+    : 'Pick a weapon below (or press <b>1</b> / <b>2</b> / <b>3</b>), aim with your <b>mouse</b>, and <b>click</b> or press <b>SPACE</b> to attack. Melee is free — the blaster costs cells.';
+  renderCombatPicker();
+  document.getElementById('combatScreen').classList.remove('hidden');
+}
+function renderCombatPicker(){
+  const box=document.getElementById('combatPick');box.innerHTML='';
+  const list=[{id:'axe',ic:'🪓',n:'AXE',k:'1',d:'melee · free'},
+              {id:'blaster',ic:'🔫',n:'BLASTER',k:'2',d:'ranged · cells'},
+              {id:'pulse',ic:'🭬',n:'PULSE',k:'3',d:'heavy · cells'}];
+  list.forEach(wp=>{
+    if(!owned[wp.id])return;
+    const b=document.createElement('button');
+    b.className='wpick'+(curWeapon===wp.id?' sel':'');
+    b.innerHTML='<span class="ic">'+wp.ic+'</span>'+wp.n+'<span class="k">'+wp.k+' · '+wp.d+'</span>';
+    b.onclick=()=>{curWeapon=wp.id;renderWeapons();renderCombatPicker();};
+    box.appendChild(b);
+  });
+}
+function closeCombatLesson(){
+  document.getElementById('combatScreen').classList.add('hidden');
+  if(!userPaused&&!choicePending)paused=false;
+  const el=document.getElementById('tutHint');
+  el.textContent=document.body.classList.contains('touch-on')
+    ?'⚔ push the SHOOT stick toward the enemy'
+    :'⚔ aim with mouse · CLICK or SPACE to attack';
+  el.classList.remove('hidden');
+}
 function tutTarget(){return structures.find(st=>st.type==='wreck'&&st.hasPart&&!st.looted);}
 function setTut(step){
   tut.step=step;
@@ -839,7 +949,7 @@ function openBench(){
   box.classList.remove('hidden');
   renderBench();
 }
-function closeBench(){paused=false;document.getElementById('bench').classList.add('hidden');}
+function closeBench(){document.getElementById('bench').classList.add('hidden');if(!userPaused&&!choicePending)paused=false;}
 function sectionHeader(txt){
   const h=document.createElement('div');
   h.style.cssText='font-family:"Share Tech Mono",monospace;font-size:11px;letter-spacing:2px;color:var(--muted);margin:10px 0 2px;text-transform:uppercase;';
@@ -1207,11 +1317,12 @@ function update(dt){
     let foe=null,fd=1e9;enemies.forEach(en=>{const d2=dist(en,player);if(d2<fd){fd=d2;foe=en;}});
     if(foe&&fd<220&&tutKills===0){
       if(!tut.combat){tut.combat=true;
-        const el=document.getElementById('tutHint');
-        el.textContent=document.body.classList.contains('touch-on')
-          ?'⚔ enemy! push the SHOOT stick toward it to fire · WEAPON to switch'
-          :'⚔ enemy! aim with mouse (or move toward it) · CLICK / SPACE to shoot · 1/2/3 switch weapon';
-        el.classList.remove('hidden');}
+        if(!combatLessonDone){openCombatLesson();}
+        else{const el=document.getElementById('tutHint');
+          el.textContent=document.body.classList.contains('touch-on')
+            ?'⚔ push the SHOOT stick toward the enemy'
+            :'⚔ aim with mouse · CLICK or SPACE to attack';
+          el.classList.remove('hidden');}}
     } else {
       if(tut.combat){tut.combat=false;setTut(tut.step);}
       const tw=tutTarget();
@@ -1745,9 +1856,14 @@ function startGame(){
   document.getElementById('titleScreen').classList.add('hidden');
   document.getElementById('hud').style.display='flex';
   document.getElementById('weapons').style.display='flex';
+  document.getElementById('pauseBtn').classList.remove('hidden');
   player=makePlayer();
   scrap=15;shipParts=0;coreTaken=false;boss=null;artifacts=0;
   zone=0;zoneTaskDone=false;exitGate=null;choicePending=false;transitioning=false;
+  userPaused=false;combatLessonDone=false;tut.combat=false;tutKills=0;
+  document.getElementById('pauseScreen').classList.add('hidden');
+  document.getElementById('combatScreen').classList.add('hidden');
+  document.getElementById('pauseBtn').textContent='II';
   document.getElementById('fadeLayer').classList.remove('on');
   survivorSaved=false;tookShortcut=false;ally=null;carryingCell=false;
   upg={dmg:0,hull:0,spd:0,cells:0};buffs={dmg:0,spd:0,shield:0};paused=false;
