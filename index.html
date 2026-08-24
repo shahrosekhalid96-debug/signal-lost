@@ -762,7 +762,7 @@ const ENTRY_CHOICES={
 };
 let transitioning=false;
 /* first-steps tutorial (zone 1 only): guide to first wreck, then E, then done */
-let tut={step:2};
+let tut={step:2,combat:false};let tutKills=0;
 function tutTarget(){return structures.find(st=>st.type==='wreck'&&st.hasPart&&!st.looted);}
 function setTut(step){
   tut.step=step;
@@ -984,6 +984,7 @@ function hurtEnemy(e,dmg){
   if(e.kind!=='keeper')e.stun=0.08;   // boss shrugs off stagger
   burst(e.x,e.y,e.color,6);
   if(e.hp<=0){
+    tutKills++;
     burst(e.x,e.y,e.color,e.kind==='keeper'?60:18);
     sfx('die');
     if(e.kind==='keeper'){
@@ -1201,11 +1202,23 @@ function update(dt){
   // pickups (float + collect)
   pickups.forEach(p=>{if(dist(p,player)<player.r+12)collect(p);});
 
-  // tutorial step progression
-  if(tut.step<2&&zone===0){const tw=tutTarget();
-    if(tw){const td=dist(tw,player);
-      if(tut.step===0&&td<110)setTut(1);
-      else if(tut.step===1&&td>=140)setTut(0);}
+  // tutorial step progression (incl. combat lesson)
+  if(tut.step<2&&zone===0){
+    let foe=null,fd=1e9;enemies.forEach(en=>{const d2=dist(en,player);if(d2<fd){fd=d2;foe=en;}});
+    if(foe&&fd<220&&tutKills===0){
+      if(!tut.combat){tut.combat=true;
+        const el=document.getElementById('tutHint');
+        el.textContent=document.body.classList.contains('touch-on')
+          ?'⚔ enemy! push the SHOOT stick toward it to fire · WEAPON to switch'
+          :'⚔ enemy! aim with mouse (or move toward it) · CLICK / SPACE to shoot · 1/2/3 switch weapon';
+        el.classList.remove('hidden');}
+    } else {
+      if(tut.combat){tut.combat=false;setTut(tut.step);}
+      const tw=tutTarget();
+      if(tw){const td=dist(tw,player);
+        if(tut.step===0&&td<110)setTut(1);
+        else if(tut.step===1&&td>=140)setTut(0);}
+    }
   }
   // walking into the exit gate transitions automatically — no key needed
   if(zoneTaskDone&&exitGate&&!transitioning&&!choicePending&&!inDialog&&dist(exitGate,player)<exitGate.r){
@@ -1506,6 +1519,10 @@ function render(){
 /* ---- current objective targets (where the arrows/minimap point) ---- */
 function objectiveTargets(){
   const out=[];
+  if(tut.step<2&&zone===0){const tw=tutTarget();
+    if(tw)out.push({x:tw.x,y:tw.y,c:'#ffe36e',kind:'tut'});
+    if(activeDrop&&activeDrop.state==='ready')out.push({x:activeDrop.x,y:activeDrop.y,c:'#ffe36e',kind:'drop'});
+    return out;}
   const ac=Z().accent;
   if(zoneTaskDone && exitGate){
     out.push({x:exitGate.x,y:exitGate.y,c:ac,kind:'gate'});
